@@ -568,6 +568,7 @@ class SwinTransformer(nn.Module):
         depths: list[int],
         num_heads: list[int],
         window_size: list[int],
+        in_channels: int = 1,
         mlp_ratio: float = 4.0,
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
@@ -579,6 +580,8 @@ class SwinTransformer(nn.Module):
     ):
         super().__init__()
         self.num_classes = num_classes
+        self.embed_dim = embed_dim
+        self.depths = depths
 
         if block is None:
             block = SwinTransformerBlockV2
@@ -590,7 +593,7 @@ class SwinTransformer(nn.Module):
         self.encoder_layers.append(
             nn.Sequential(
                 nn.Conv2d(
-                    1, embed_dim, kernel_size=(patch_size[0], patch_size[1]), stride=(patch_size[0], patch_size[1])
+                    in_channels, embed_dim, kernel_size=(patch_size[0], patch_size[1]), stride=(patch_size[0], patch_size[1])
                 ),
                 Permute([0, 2, 3, 1]),
                 norm_layer(embed_dim),
@@ -633,15 +636,17 @@ class SwinTransformer(nn.Module):
 
         num_features = embed_dim * 2 ** (len(depths) - 1)
         self.norm = norm_layer(num_features)
-        # self.permute = Permute([0, 3, 1, 2])  # B H W C -> B C H W
-        # self.avgpool = nn.AdaptiveAvgPool2d(1)
-        # self.flatten = nn.Flatten(1)
-        # self.head = nn.Linear(num_features, num_classes)
-        self.up1 = Unet_Block_Up(768, 384)
-        self.up2 = Unet_Block_Up(384, 192)
-        self.up3 = Unet_Block_Up(192, 96)
-
-        self.head = SegmentationHead(96, self.num_classes)
+        
+        # Build decoder with dynamic dimensions based on encoder configuration
+        # Decoder mirrors the encoder: num_features -> num_features//2 -> ... -> embed_dim
+        decoder_dims = [embed_dim * 2 ** i for i in range(len(depths))]
+        decoder_dims = list(reversed(decoder_dims))  # [768, 384, 192, 96] for default config
+        
+        self.up_blocks = nn.ModuleList()
+        for i in range(len(decoder_dims) - 1):
+            self.up_blocks.append(Unet_Block_Up(decoder_dims[i], decoder_dims[i + 1]))
+        
+        self.head = SegmentationHead(decoder_dims[-1], self.num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -650,20 +655,22 @@ class SwinTransformer(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
-
         out_features = []
         for layer in self.encoder_layers:
             x = layer(x)
             if not isinstance(layer, PatchMergingV2):
-                out_features.append(x.permute(0,3,1,2))
-        del out_features[0]    ## removing the feature output from the first Conv Layer
-
-        out_features = list(reversed(out_features))
-
-        u1 = self.up1(out_features[0], out_features[1])
-        u2 = self.up2(u1, out_features[2])
-        u3 = self.up3(u2, out_features[3])
-        out = self.head(u3)
-        # print(f"Output shape: {out.shape}")
+                out_features.append(x.permute(0, 3, 1, 2))
         
+        # Remove the feature output from the first Conv Layer
+        del out_features[0]
+        
+        # Reverse for decoder (deepest features first)
+        out_features = list(reversed(out_features))
+        
+        # Apply decoder blocks with skip connections
+        x = out_features[0]
+        for i, up_block in enumerate(self.up_blocks):
+            x = up_block(x, out_features[i + 1])
+        
+        out = self.head(x)
         return out

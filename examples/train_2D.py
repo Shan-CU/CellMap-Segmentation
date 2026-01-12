@@ -19,9 +19,7 @@
 # %% Imports
 from upath import UPath
 
-from cellmap_segmentation_challenge.models import ResNet, UNet_2D
-# from cellmap_segmentation_challenge.models.swin import Swin_Unet
-from cellmap_segmentation_challenge.models.SwinTransformerBlock import SwinTransformerBlockV2, SwinTransformer
+from cellmap_segmentation_challenge.models import ResNet, UNet_2D, SwinTransformer
 from cellmap_segmentation_challenge.utils import get_tested_classes
 
 # %% Set hyperparameters and other configurations

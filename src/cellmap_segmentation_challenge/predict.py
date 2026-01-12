@@ -151,7 +151,7 @@ def predict(
     crops: str = "test",
     output_path: str = PREDICTIONS_PATH,
     do_orthoplanes: bool = True,
-    overwrite: bool = True,
+    overwrite: bool = False,
     search_path: str = SEARCH_PATH,
     raw_name: str = RAW_NAME,
     crop_name: str = CROP_NAME,
@@ -235,7 +235,6 @@ def predict(
     # Get the crops to predict on
     if crops == "test":
         test_crops = get_test_crops()
-        print(f"Number of test crops {len(test_crops)}")
         dataset_writers = []
         for crop in test_crops:
             # Get path to raw dataset
@@ -284,7 +283,7 @@ def predict(
                     ).rstrip(os.path.sep)
                 )
             )
-        print(f'crop list in else block crops number {len(crop_list)}')
+
         dataset_writers = []
         for crop, crop_path in zip(crop_list, crop_paths):  # type: ignore
             # Get path to raw dataset
@@ -325,11 +324,6 @@ def predict(
                     "device": device,
                 }
             )
-    print(f"Total number of test writers available : {len(dataset_writers)}")
+
     for dataset_writer in dataset_writers:
-        zdiff = dataset_writer['target_bounds']['output']['z'][1]-dataset_writer['target_bounds']['output']['z'][0]
-        ydiff = dataset_writer['target_bounds']['output']['y'][1]-dataset_writer['target_bounds']['output']['y'][0]
-        xdiff = dataset_writer['target_bounds']['output']['x'][1]-dataset_writer['target_bounds']['output']['x'][0]
-        include = (zdiff < 2500 and ydiff < 2500 and xdiff < 2500)
-        if include:
-            predict_func(model, dataset_writer, batch_size)
+        predict_func(model, dataset_writer, batch_size)

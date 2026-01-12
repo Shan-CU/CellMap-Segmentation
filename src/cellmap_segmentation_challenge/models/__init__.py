@@ -10,3 +10,4 @@ from .resnet import ResNet
 from .unet_model_2D import UNet_2D
 from .unet_model_3D import UNet_3D
 from .vitnet import ViTVNet
+from .SwinTransformerBlock import SwinTransformer, SwinTransformerBlock, SwinTransformerBlockV2
