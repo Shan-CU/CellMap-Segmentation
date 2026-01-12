@@ -20,34 +20,62 @@
 from upath import UPath
 
 from cellmap_segmentation_challenge.models import ResNet, UNet_2D
+# from cellmap_segmentation_challenge.models.swin import Swin_Unet
+from cellmap_segmentation_challenge.models.SwinTransformerBlock import SwinTransformerBlockV2, SwinTransformer
+from cellmap_segmentation_challenge.utils import get_tested_classes
 
 # %% Set hyperparameters and other configurations
 learning_rate = 0.0001  # learning rate for the optimizer
-batch_size = 8  # batch size for the dataloader
+batch_size = 32  # batch size for the dataloader
 input_array_info = {
-    "shape": (1, 128, 128),
+    "shape": (1, 256, 256),
     "scale": (8, 8, 8),
 }  # shape and voxel size of the data to load for the input
 target_array_info = {
-    "shape": (1, 128, 128),
+    "shape": (1, 256, 256),
     "scale": (8, 8, 8),
 }  # shape and voxel size of the data to load for the target
-epochs = 1000  # number of epochs to train the model for
-iterations_per_epoch = 1000  # number of iterations per epoch
+epochs = 2  # number of epochs to train the model for
+iterations_per_epoch = 50000  # number of iterations per epoch
 random_seed = 42  # random seed for reproducibility
 
-classes = ["nuc", "er"]  # list of classes to segment
-
+# classes = ["nuc", "er"]  # list of classes to segment
+classes = get_tested_classes()
+print(f"Total number of classes {len(classes)}")
 # Defining model (comment out all that are not used)
 # 2D UNet
-model_name = "2d_unet"  # name of the model to use
-model_to_load = "2d_unet"  # name of the pre-trained model to load
-model = UNet_2D(1, len(classes))
+# model_name = "2d_unet"  # name of the model to use
+# model_to_load = "2d_unet"  # name of the pre-trained model to load
+# model = UNet_2D(1, len(classes))
+
+# 2D UNet
+# model_name = "2d_unet_all_classes"  # name of the model to use
+# model_to_load = "2d_unet_all_classes"  # name of the pre-trained model to load
+# model = UNet_2D(1, len(classes))
 
 # # 2D ResNet [uncomment to use]
 # model_name = "2d_resnet"  # name of the model to use
 # model_to_load = "2d_resnet"  # name of the pre-trained model to load
 # model = ResNet(ndims=2, output_nc=len(classes))
+
+# # 2D VIT 
+# model_name = "2d_vit" # name of the model to use
+# model_to_load = "2d_vit"
+# model = VIT2D(len(classes), input_array_info["shape"])
+
+# # 2D Swin Unet
+# model_name = "2d_swin_unet_base"
+# model_to_load = "2d_swin_unet_base"
+# model = Swin_Unet(len(classes), input_array_info["shape"])
+
+### Testing Swin Transformer block
+model_name = '2d_swin_block_all_classes_50k_samples'
+model_to_load = '2d_swin_block_all_classes_50k_samples'
+model = SwinTransformer([4,4],
+                        96,
+                        [2,2,6,2],
+                        [3,6,12,24],
+                        [7,7], num_classes=len(classes))
 
 load_model = "latest"  # load the "latest" model or the "best" validation model
 

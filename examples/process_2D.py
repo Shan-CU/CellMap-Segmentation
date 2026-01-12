@@ -7,7 +7,7 @@ config = load_safe_config(config_path)
 # Bring the required configurations into the global namespace
 batch_size = getattr(config, "batch_size", 8)
 input_array_info = getattr(
-    config, "input_array_info", {"shape": (1, 128, 128), "scale": (8, 8, 8)}
+    config, "input_array_info", {"shape": (1, 256, 256), "scale": (8, 8, 8)}
 )
 target_array_info = getattr(config, "target_array_info", input_array_info)
 classes = config.classes
