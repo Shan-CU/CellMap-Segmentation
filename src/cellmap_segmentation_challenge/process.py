@@ -47,6 +47,7 @@ def _process(
 
         # Write the data
         dataset_writer[batch["idx"]] = {"output": outputs}
+    print("DONE:", dataset_writer_kwargs["raw_path"])
 
 
 def process(
@@ -145,50 +146,94 @@ def process(
     dataset_writers = []
     for crop, (in_path, out_path) in crop_dict.items():
         for label in classes:
-            class_in_path = str(UPath(in_path) / label)
+            try:
+                class_in_path = str(UPath(in_path) / label)
+                print(f"Crop paths during processing {class_in_path}")
 
-            # Get the boundaries of the crop
-            input_images = {
-                array_name: CellMapImage(
-                    class_in_path,
-                    target_class=label,
-                    target_scale=array_info["scale"],
-                    target_voxel_shape=array_info["shape"],
-                    pad=True,
-                    pad_value=0,
-                )
-                for array_name, array_info in target_arrays.items()
-            }
-
-            target_bounds = {
-                array_name: image.bounding_box
-                for array_name, image in input_images.items()
-            }
-
-            # Create the writer
-            dataset_writers.append(
-                {
-                    "raw_path": class_in_path,
-                    "target_path": out_path,
-                    "classes": [label],
-                    "input_arrays": input_arrays,
-                    "target_arrays": target_arrays,
-                    "target_bounds": target_bounds,
-                    "overwrite": overwrite,
-                    "device": device,
+                # Get the boundaries of the crop
+                input_images = {
+                    array_name: CellMapImage(
+                        class_in_path,
+                        target_class=label,
+                        target_scale=array_info["scale"],
+                        target_voxel_shape=array_info["shape"],
+                        pad=True,
+                        pad_value=0,
+                    )
+                    for array_name, array_info in target_arrays.items()
                 }
-            )
+
+                target_bounds = {
+                    array_name: image.bounding_box
+                    for array_name, image in input_images.items()
+                }
+
+                # Create the writer
+                dataset_writers.append(
+                    {
+                        "raw_path": class_in_path,
+                        "target_path": out_path,
+                        "classes": [label],
+                        "input_arrays": input_arrays,
+                        "target_arrays": target_arrays,
+                        "target_bounds": target_bounds,
+                        "overwrite": overwrite,
+                        "device": device,
+                    }
+                )
+            except:
+                pass
 
     executor = ThreadPoolExecutor(max_workers)
 
-    partial_process = partial(
-        _process, process_func=process_func, batch_size=batch_size
-    )
+    # partial_process = partial(
+    #     _process, process_func=process_func, batch_size=batch_size
+    # )
 
-    futures = [
-        executor.submit(partial_process, dataset_writer)
-        for dataset_writer in dataset_writers
-    ]
+    # # futures = [
+    # #     executor.submit(partial_process, dataset_writer)
+    # #     for dataset_writer in dataset_writers
+    # # ]
 
-    for future in tqdm(as_completed(futures), total=len(futures), desc="Processing..."):
-        future.result()
+    # futures = []
+
+    # for dataset_writer in dataset_writers:
+    #     bounds = dataset_writer["target_bounds"]["output"]
+
+    #     zdiff = bounds["z"][1] - bounds["z"][0]
+    #     ydiff = bounds["y"][1] - bounds["y"][0]
+    #     xdiff = bounds["x"][1] - bounds["x"][0]
+
+    #     include = zdiff < 2500 and ydiff < 2500 and xdiff < 2500
+
+    #     if include:
+    #         futures.append(
+    #             executor.submit(partial_process, dataset_writer)
+    #         )
+
+    # for future in tqdm(as_completed(futures), total=len(futures), desc="Processing..."):
+        # future.result()
+    
+    # from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        partial_process = partial(
+            _process, process_func=process_func, batch_size=batch_size
+        )
+        futures = []
+
+        for dataset_writer in dataset_writers:
+            bounds = dataset_writer["target_bounds"]["output"]
+
+            zdiff = bounds["z"][1] - bounds["z"][0]
+            ydiff = bounds["y"][1] - bounds["y"][0]
+            xdiff = bounds["x"][1] - bounds["x"][0]
+
+            if zdiff < 2500 and ydiff < 2500 and xdiff < 2500:
+                futures.append(
+                    executor.submit(partial_process, dataset_writer)
+                )
+
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing..."):
+            future.result()
+
