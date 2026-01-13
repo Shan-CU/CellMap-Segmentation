@@ -1,12 +1,7 @@
-# SwinTransformer Training Config
+# SwinTransformer Baseline Training Config
 # Run with: python train_swin_baseline.py
 # Monitor with: tensorboard --logdir tensorboard
-# Monkey-patch to fix cellmap_data bug (EmptyImage doesn't accept 'device' param)
-import cellmap_data.empty_image as _ei
-_orig_init = _ei.EmptyImage.__init__
-def _patched_init(self, *args, device=None, **kwargs):
-    _orig_init(self, *args, **kwargs)
-_ei.EmptyImage.__init__ = _patched_init
+
 from upath import UPath
 from cellmap_segmentation_challenge.models import SwinTransformer
 from cellmap_segmentation_challenge.utils import get_tested_classes
