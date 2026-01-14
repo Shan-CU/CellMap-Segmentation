@@ -2,6 +2,7 @@
 
 #SBATCH --job-name=swin_baseline
 #SBATCH --partition=aa100
+#SBATCH --account=ucb-general
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
