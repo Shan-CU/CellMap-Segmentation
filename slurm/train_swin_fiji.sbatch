@@ -40,7 +40,7 @@ source ~/miniconda3/bin/activate cellmap || {
 # Verify GPU access
 echo "Python: $(which python)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
-echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')
 echo "GPU device: $(python -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\")')"
 
 # Create logs directory

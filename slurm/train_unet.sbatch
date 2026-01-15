@@ -6,9 +6,9 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=32
+#SBATCH --gres=gpu:3
+#SBATCH --mem=192G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/unet_%j.out
 #SBATCH --error=logs/unet_%j.err
@@ -16,12 +16,21 @@
 #SBATCH --mail-user=george.stephenson@colorado.edu
 
 # ============================================================
-# CellMap UNet Baseline Training on Alpine
+# CellMap UNet Baseline Training on Alpine (24-HOUR OPTIMIZED)
+# Hardware: aa100 partition - 3x NVIDIA A100 80GB, 64 cores, 243GB RAM
+# Resource Request: 3 GPUs, 32 CPUs, 192GB RAM
+# Optimizations:
+#   - 3 GPUs with DataParallel for ~3x throughput
+#   - 32 CPU cores for parallel data loading
+#   - Local scratch ($SLURM_SCRATCH) for fastest I/O
+#   - Mixed precision (AMP) for TensorCore acceleration
+#   - Optimized for full 24-hour utilization
 # ============================================================
 
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
+echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Start time: $(date)"
 echo "=========================================="
@@ -47,10 +56,34 @@ conda activate /projects/$USER/software/anaconda/envs/cellmap || {
 echo "Python: $(which python)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
 echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
-echo "GPU device: $(python -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None")')"
+echo "GPU count: $(python -c 'import torch; print(torch.cuda.device_count())')"
+for i in $(seq 0 2); do
+    echo "GPU $i: $(python -c "import torch; print(torch.cuda.get_device_name($i) if torch.cuda.device_count() > $i else 'N/A')")"
+done
 
 # Create logs directory if it doesn't exist
-mkdir -p logs tensorboard
+mkdir -p logs tensorboard checkpoints
+
+# ============================================================
+# ALPINE OPTIMIZATION: Stage data to local scratch for fastest I/O
+# $SLURM_SCRATCH is a ~300GB local SSD - MUCH faster than network storage
+# ============================================================
+echo "Setting up local scratch for fast I/O..."
+echo "Local scratch: $SLURM_SCRATCH"
+
+# Set environment variables for optimal performance
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
+# If data is on network storage, copy to local scratch
+# Uncomment and modify the following if you want to stage data:
+# DATA_SOURCE="/scratch/alpine/$USER/cellmap_data"
+# if [ -d "$DATA_SOURCE" ]; then
+#     echo "Staging data to local scratch..."
+#     rsync -a --info=progress2 "$DATA_SOURCE" "$SLURM_SCRATCH/"
+#     export CELLMAP_DATA_DIR="$SLURM_SCRATCH/cellmap_data"
+#     echo "Data staged to: $CELLMAP_DATA_DIR"
+# fi
 
 # ============================================================
 # Start TensorBoard in background

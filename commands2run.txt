@@ -1,0 +1,28 @@
+**After rsync completes, SSH to Alpine:**
+
+```
+ssh gest9386@login.rc.colorado.edu
+```
+
+**Then run these commands:**
+
+```
+cd /projects/gest9386/CellMap-Segmentation
+ln -s /scratch/alpine/gest9386/cellmap_data data
+git pull origin main
+sbatch slurm/train_unet.sbatch
+sbatch slurm/train_swin.sbatch
+squeue --user=gest9386
+```
+
+**Check job output once running (replace JOBID):**
+```
+cat logs/unet_JOBID.out | head -50
+```
+
+**Connect TensorBoard from LOCAL machine (use info from job output):**
+```
+ssh -L PORT:NODE:PORT gest9386@login.rc.colorado.edu
+```
+
+Then open: `http://localhost:PORT`

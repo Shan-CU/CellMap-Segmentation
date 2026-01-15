@@ -30,9 +30,8 @@ git clone https://github.com/Shan-CU/CellMap-Segmentation.git
 cd CellMap-Segmentation
 pip install -e .
 
-# IMPORTANT: Downgrade cellmap-data to fix zarr compatibility issue
-# See "Known Issues" section below for details
-pip install cellmap-data==2025.9.9.1720
+# Pin cellmap-data version (2025.12.24 has EmptyImage bug, 2025.12.12 works)
+pip install cellmap-data==2025.12.12.1737
 
 # Install tensorboard for monitoring
 pip install tensorboard
@@ -132,22 +131,61 @@ This is already included in the setup instructions above.
 
 ---
 
+## Alpine A100 Hardware Optimizations
+
+Based on [CU Research Computing Documentation](https://github.com/ResearchComputing/Documentation):
+
+### Hardware Specs (aa100 partition)
+- **3x NVIDIA A100 80GB GPUs** per node
+- **64 CPU cores** (AMD Milan)
+- **~243GB RAM** (3.8GB/core)
+- **~300GB local SSD** (`$SLURM_SCRATCH`)
+- **2x25 Gb Ethernet + RoCE** network
+
+### Optimizations Applied
+
+| Optimization | Before | After | Impact |
+|--------------|--------|-------|--------|
+| GPUs | 1 | 3 | ~3x throughput with DataParallel |
+| CPU cores | 8 | 16 | Faster data loading |
+| Memory | 32GB | 128GB | Larger batches possible |
+| Batch size | 8 | 16×n_gpus | Better GPU utilization |
+| Data loading | Default | pin_memory, persistent_workers | Faster CPU→GPU transfer |
+| Local scratch | Not used | Available | ~10x faster I/O |
+
+### Data I/O Best Practices
+
+1. **Fastest**: Copy data to `$SLURM_SCRATCH` (local SSD, ~300GB)
+2. **Fast**: Use `/scratch/alpine/$USER` (10TB, network)
+3. **Avoid**: `/projects` or `/home` for training I/O
+
+```bash
+# Stage data to local scratch at job start (optional, for max speed)
+rsync -a /scratch/alpine/$USER/cellmap_data $SLURM_SCRATCH/
+export CELLMAP_DATA_DIR=$SLURM_SCRATCH/cellmap_data
+```
+
+---
+
 ## SLURM Job Parameters Explained
 
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
-| `--partition=aa100` | A100 GPU nodes | NVIDIA A100 GPUs |
-| `--gres=gpu:1` | 1 GPU | Request single GPU |
-| `--mem=32G` | 32GB RAM | CPU memory |
-| `--time=24:00:00` | 24 hours | Max runtime |
-| `--cpus-per-task=8` | 8 CPU cores | For data loading |
+| `--partition=aa100` | A100 GPU nodes | NVIDIA A100 80GB GPUs |
+| `--gres=gpu:3` | 3 GPUs | All 3 A100s on the node |
+| `--mem=128G` | 128GB RAM | ~Half node memory |
+| `--time=24:00:00` | 24 hours | Max runtime (normal QoS) |
+| `--cpus-per-task=16` | 16 CPU cores | For parallel data loading |
+| `--qos=long` | 7 days | Use for longer runs |
 
 ### Alternative Partitions
 
-| Partition | GPUs | Notes |
-|-----------|------|-------|
-| `aa100` | NVIDIA A100 (40GB) | Best for deep learning |
-| `ami100` | AMD MI100 | Requires ROCm |
+| Partition | GPUs | VRAM | Notes |
+|-----------|------|------|-------|
+| `aa100` | 3x NVIDIA A100 | 80GB | Best for deep learning |
+| `ami100` | 3x AMD MI100 | 32GB | Requires ROCm |
+| `al40` | 3x NVIDIA L40 | 48GB | Good alternative |
+| `atesting_a100` | 1x A100 (MIG) | 20GB | Quick testing (1hr limit) |
 | `al40` | NVIDIA L40 | Newer, good alternative |
 | `atesting_a100` | A100 (MIG slice) | Quick tests, 1hr max |
 
