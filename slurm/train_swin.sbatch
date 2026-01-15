@@ -29,12 +29,19 @@ echo "=========================================="
 # Go to project directory
 cd $SLURM_SUBMIT_DIR
 
-# Load modules
+# Load modules (slurm/alpine is required for Alpine cluster)
 module purge
+module load slurm/alpine
 module load anaconda
 
 # Activate your conda environment
-conda activate /projects/$USER/software/anaconda/envs/cellmap
+# The environment should be at /projects/$USER/software/anaconda/envs/cellmap
+# If this fails, check that the environment exists with: ls /projects/$USER/software/anaconda/envs/
+conda activate /projects/$USER/software/anaconda/envs/cellmap || {
+    echo "ERROR: Failed to activate conda environment"
+    echo "Available envs: $(ls /projects/$USER/software/anaconda/envs/ 2>/dev/null || echo 'none found')"
+    exit 1
+}
 
 # Verify GPU access
 echo "Python: $(which python)"
