@@ -29,13 +29,13 @@ echo "=========================================="
 # Go to project directory
 cd $SLURM_SUBMIT_DIR
 
-# Load modules (adjust based on fiji's available modules)
-module purge
-module load anaconda
-
-# Activate your conda environment
-# Adjust path based on where your env is on fiji
-conda activate cellmap
+# Initialize and activate conda (fiji uses local miniconda3)
+source ~/miniconda3/bin/activate cellmap || {
+    echo "ERROR: Failed to activate conda environment"
+    echo "Checking miniconda3 location..."
+    ls -la ~/miniconda3/envs/
+    exit 1
+}
 
 # Verify GPU access
 echo "Python: $(which python)"
