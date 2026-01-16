@@ -56,7 +56,8 @@ mkdir -p logs tensorboard checkpoints
 
 # Set environment variables
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+# Note: expandable_segments:True causes CUDA IPC errors on Alpine kernel
+export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 
 # ============================================================
 # Start TensorBoard in background
