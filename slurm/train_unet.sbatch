@@ -72,7 +72,8 @@ echo "Local scratch: $SLURM_SCRATCH"
 
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+# Note: expandable_segments:True causes CUDA IPC errors on Alpine kernel
+export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 
 # If data is on network storage, copy to local scratch
 # Uncomment and modify the following if you want to stage data:
