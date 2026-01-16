@@ -45,5 +45,18 @@ __getattr__, __dir__, __all__ = lazy.attach(
             "monitor_jobs",
             "eval_batch",
         ],
+        "ddp": [
+            "setup_ddp",
+            "cleanup_ddp",
+            "is_ddp_initialized",
+            "is_main_process",
+            "get_world_size",
+            "get_rank",
+            "get_local_rank",
+            "reduce_value",
+            "broadcast_object",
+            "sync_across_processes",
+            "get_ddp_sampler",
+        ],
     },
 )

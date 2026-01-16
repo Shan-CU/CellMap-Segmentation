@@ -1,5 +1,5 @@
-# UNet 3D Baseline Training Config (Optimized for Alpine A100)
-# Run with: python train_unet3d_baseline.py
+# UNet 3D Baseline Training Config with DDP (Optimized for Alpine A100)
+# Run with: torchrun --nproc_per_node=3 examples/train_unet3d_baseline.py
 # Monitor with: tensorboard --logdir tensorboard
 #
 # 3D MODEL ADVANTAGES:
@@ -7,23 +7,43 @@
 #   - Better for volumetric EM data
 #   - More parameters but captures 3D structure
 #
+# DDP ADVANTAGES OVER DATAPARALLEL:
+#   - One process per GPU avoids Python GIL bottleneck
+#   - Efficient gradient synchronization via NCCL all-reduce
+#   - Lower memory overhead (each process holds only its gradients)
+#   - Better batch distribution across processes
+#
 # TRADE-OFF: Much higher memory usage - smaller batch sizes required
 
+import os
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from upath import UPath
 from cellmap_segmentation_challenge.models import UNet_3D
 from cellmap_segmentation_challenge.utils import get_tested_classes
+from cellmap_segmentation_challenge.utils.ddp import (
+    setup_ddp, cleanup_ddp, is_main_process, get_world_size, get_local_rank
+)
+
+# ============================================================
+# DDP SETUP - Must be called before any CUDA operations
+# ============================================================
+local_rank, world_size = setup_ddp()
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 # %% Hyperparameters - Optimized for 3D training on Alpine A100
 learning_rate = 1e-4  # Peak LR after warmup
 
 # Batch size - 3D uses MUCH more memory than 2D
 # A100 80GB can handle batch=4 per GPU for 32×256×256 volumes
-n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+# With DDP, each GPU gets its own batch_size (no multiplication needed)
+n_gpus = world_size if world_size > 0 else 1
 batch_size_per_gpu = 4  # Small due to 3D memory requirements
-batch_size = batch_size_per_gpu * n_gpus  # 12 total with 3 GPUs
-gradient_accumulation_steps = 8  # Effective batch = 12 * 8 = 96
-print(f"Using {n_gpus} GPU(s), batch_size={batch_size}, effective_batch={batch_size * gradient_accumulation_steps}")
+batch_size = batch_size_per_gpu  # Per-GPU batch size (DDP distributes across processes)
+gradient_accumulation_steps = 8  # Effective batch per GPU = 4 * 8 = 32, total = 32 * n_gpus
+if is_main_process():
+    print(f"Using {n_gpus} GPU(s) with DDP, batch_size_per_gpu={batch_size}, effective_batch_total={batch_size * gradient_accumulation_steps * n_gpus}")
 
 # 3D input - 32 slices of 256×256
 # This captures ~256nm of depth context (32 slices × 8nm/slice)
@@ -51,7 +71,8 @@ classes = [
     'golgi_mem', 'golgi_lum', 'ves_mem', 'ves_lum',
     'endo_mem', 'endo_lum', 'er_mem', 'er_lum', 'nuc'
 ]
-print(f"Training UNet 3D baseline with {len(classes)} classes: {classes}")
+if is_main_process():
+    print(f"Training UNet 3D baseline with {len(classes)} classes: {classes}")
 
 # Model - UNet 3D
 model_name = "unet3d_baseline"
@@ -59,11 +80,15 @@ model_to_load = "unet3d_baseline"
 _model = UNet_3D(1, len(classes))
 
 # ============================================================
-# MULTI-GPU: Wrap model with DataParallel if multiple GPUs available
+# DDP: Wrap model with DistributedDataParallel
 # ============================================================
-if n_gpus > 1:
-    print(f"Using DataParallel with {n_gpus} GPUs")
-    model = torch.nn.DataParallel(_model)
+# Move model to the correct device first
+_model = _model.to(device)
+
+if world_size > 1:
+    if is_main_process():
+        print(f"Using DistributedDataParallel with {n_gpus} GPUs")
+    model = DDP(_model, device_ids=[local_rank], output_device=local_rank)
 else:
     model = _model
 
@@ -112,7 +137,8 @@ force_all_classes = False
 
 # Dataloader - fewer workers for 3D (more memory per sample)
 n_workers = 8  # Reduced from 16 due to 3D memory
-print(f"Using {n_workers} dataloader workers")
+if is_main_process():
+    print(f"Using {n_workers} dataloader workers per process")
 
 dataloader_kwargs = {
     "num_workers": n_workers,
@@ -124,6 +150,18 @@ dataloader_kwargs = {
 # Mixed precision - critical for 3D to fit in memory
 use_mixed_precision = True
 
+# ============================================================
+# DDP-SPECIFIC SETTINGS
+# ============================================================
+# These are used by the train function to enable DDP-specific behavior
+use_ddp = world_size > 1  # Enable DDP mode in training
+ddp_local_rank = local_rank  # GPU index for this process
+ddp_world_size = world_size  # Total number of processes
+
 if __name__ == "__main__":
     from cellmap_segmentation_challenge import train
-    train(__file__)
+    try:
+        train(__file__)
+    finally:
+        # Clean up DDP process group
+        cleanup_ddp()

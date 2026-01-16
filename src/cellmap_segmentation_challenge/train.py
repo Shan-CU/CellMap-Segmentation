@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision.transforms.v2 as T
 from cellmap_data.utils import get_fig_dict, longest_common_substring
 from cellmap_data.transforms.augment import NaNtoNum, Binarize
@@ -21,6 +22,7 @@ from .utils import (
     make_s3_datasplit_csv,
     format_string,
 )
+from .utils.ddp import is_main_process, is_ddp_initialized, reduce_value, sync_across_processes
 
 
 def train(config_path: str):
@@ -70,6 +72,9 @@ def train(config_path: str):
         - filter_by_scale: Whether to filter the data by scale. If True, only data with a scale less than or equal to the `input_array_info` highest resolution will be included in the datasplit. If set to a scalar value, data will be filtered for that isotropic resolution - anisotropic can be specified with a sequence of scalars. Default is False (no filtering).
         - gradient_accumulation_steps: Number of gradient accumulation steps to use. Default is 1. This can be used to simulate larger batch sizes without increasing memory usage.
         - dataloader_kwargs: Additional keyword arguments to pass to the CellMapDataLoader. Default is {}.
+        - use_ddp: Whether Distributed Data Parallel (DDP) is enabled. Default is False. When True, assumes the model is already wrapped in DDP and the process group is initialized.
+        - ddp_local_rank: The local GPU rank for this process when using DDP. Default is 0.
+        - ddp_world_size: Total number of processes when using DDP. Default is 1.
 
     Returns
     -------
@@ -186,11 +191,21 @@ def train(config_path: str):
             f"gradient_accumulation_steps must be >= 1, but got {gradient_accumulation_steps}"
         )
 
-    # %% Make sure the save path exists
-    for path in [model_save_path, logs_save_path, datasplit_path]:
-        dirpath = os.path.dirname(path)
-        if len(dirpath) > 0:
-            os.makedirs(dirpath, exist_ok=True)
+    # %% DDP-specific settings
+    use_ddp = getattr(config, "use_ddp", False)
+    ddp_local_rank = getattr(config, "ddp_local_rank", 0)
+    ddp_world_size = getattr(config, "ddp_world_size", 1)
+
+    # %% Make sure the save path exists (only on main process for DDP)
+    if is_main_process():
+        for path in [model_save_path, logs_save_path, datasplit_path]:
+            dirpath = os.path.dirname(path)
+            if len(dirpath) > 0:
+                os.makedirs(dirpath, exist_ok=True)
+    
+    # Synchronize all processes after directory creation
+    if use_ddp:
+        sync_across_processes()
 
     # %% Set the random seed
     if torch.cuda.is_available():
@@ -207,7 +222,11 @@ def train(config_path: str):
             device = "mps"
         else:
             device = "cpu"
-    print(f"Training device: {device}")
+    if is_main_process():
+        if use_ddp:
+            print(f"Training device: {device} (DDP enabled with {ddp_world_size} processes)")
+        else:
+            print(f"Training device: {device}")
 
     # %% Make the datasplit file if it doesn't exist
     if not os.path.exists(datasplit_path):
@@ -335,13 +354,16 @@ def train(config_path: str):
     # %% Train the model
     post_fix_dict = {}
 
-    # Define a summarywriter
-    writer = SummaryWriter(format_string(logs_save_path, {"model_name": model_name}))
+    # Define a summarywriter (only on main process for DDP)
+    writer = None
+    if is_main_process():
+        writer = SummaryWriter(format_string(logs_save_path, {"model_name": model_name}))
 
     # Training outer loop, across epochs
-    print(
-        f"Training {model_name} for {len(epochs)} epochs, starting at epoch {epochs[0]}, iteration {n_iter}..."
-    )
+    if is_main_process():
+        print(
+            f"Training {model_name} for {len(epochs)} epochs, starting at epoch {epochs[0]}, iteration {n_iter}..."
+        )
     for epoch in epochs:
 
         # Set the model to training mode to enable backpropagation
@@ -356,8 +378,10 @@ def train(config_path: str):
         # epoch_bar = tqdm(train_loader.loader, desc="Training", dynamic_ncols=True)
         # for batch in epoch_bar:
         loader = iter(train_loader.loader)
+        # Only show progress bar on main process for DDP
         epoch_bar = tqdm(
-            range(iterations_per_epoch), desc="Training", dynamic_ncols=True
+            range(iterations_per_epoch), desc="Training", dynamic_ncols=True,
+            disable=not is_main_process()  # Disable tqdm on non-main processes
         )
         optimizer.zero_grad()
         for epoch_iter in epoch_bar:
@@ -404,19 +428,33 @@ def train(config_path: str):
             post_fix_dict["Loss"] = f"{loss.item()}"
             epoch_bar.set_postfix(post_fix_dict)
 
-            # Log the loss using tensorboard
-            writer.add_scalar("loss", loss.item(), n_iter)
+            # Log the loss using tensorboard (only on main process)
+            if writer is not None:
+                writer.add_scalar("loss", loss.item(), n_iter)
 
         if scheduler is not None:
             # Step the scheduler at the end of each epoch
             scheduler.step()
-            writer.add_scalar("lr", scheduler.get_last_lr()[0], n_iter)
+            if writer is not None:
+                writer.add_scalar("lr", scheduler.get_last_lr()[0], n_iter)
 
-        # Save the model
-        torch.save(
-            model.state_dict(),
-            format_string(model_save_path, {"epoch": epoch, "model_name": model_name}),
-        )
+        # Synchronize all processes before saving (ensures all gradients are synced)
+        if use_ddp:
+            sync_across_processes()
+
+        # Save the model (only on main process for DDP)
+        if is_main_process():
+            # For DDP, save the underlying model's state_dict (model.module)
+            if use_ddp and hasattr(model, 'module'):
+                torch.save(
+                    model.module.state_dict(),
+                    format_string(model_save_path, {"epoch": epoch, "model_name": model_name}),
+                )
+            else:
+                torch.save(
+                    model.state_dict(),
+                    format_string(model_save_path, {"epoch": epoch, "model_name": model_name}),
+                )
 
         # Compute the validation score by averaging the loss across the validation set
         if len(val_loader.loader) > 0:
@@ -431,6 +469,7 @@ def train(config_path: str):
                     desc="Validation",
                     bar_format="{l_bar}{bar}| {remaining}s remaining",
                     dynamic_ncols=True,
+                    disable=not is_main_process()  # Disable tqdm on non-main processes
                 )
             else:
                 val_bar = tqdm(
@@ -438,6 +477,7 @@ def train(config_path: str):
                     desc="Validation",
                     total=validation_batch_limit or len(val_loader.loader),
                     dynamic_ncols=True,
+                    disable=not is_main_process()  # Disable tqdm on non-main processes
                 )
 
             # Free up GPU memory, disable backprop etc.
@@ -479,50 +519,57 @@ def train(config_path: str):
                         break
                 val_score /= i
 
-                # Log the validation using tensorboard
-                writer.add_scalar("validation", val_score, n_iter)
+                # Reduce validation score across all processes for DDP
+                if use_ddp:
+                    val_score = reduce_value(val_score, op="mean")
+
+                # Log the validation using tensorboard (only on main process)
+                if writer is not None:
+                    writer.add_scalar("validation", val_score, n_iter)
 
                 # Update the progress bar
                 post_fix_dict["Validation"] = f"{val_score:.4f}"
 
-        # Generate and save figures from the last batch of the validation to appear in tensorboard
-        if isinstance(outputs, dict):
-            outputs = list(outputs.values())
-        if len(input_keys) == len(target_keys) != 1:
-            # If the number of input and target keys is the same, assume they are paired
-            for i, (in_key, target_key) in enumerate(zip(input_keys, target_keys)):
-                figs = get_fig_dict(
-                    input_data=batch[in_key],
-                    target_data=batch[target_key],
-                    outputs=outputs[i],
-                    classes=classes,
-                )
-                array_name = longest_common_substring(in_key, target_key)
-                for name, fig in figs.items():
-                    writer.add_figure(f"{name}: {array_name}", fig, n_iter)
-                    plt.close(fig)
+        # Generate and save figures from the last batch of the validation to appear in tensorboard (only on main process)
+        if is_main_process() and writer is not None:
+            if isinstance(outputs, dict):
+                outputs = list(outputs.values())
+            if len(input_keys) == len(target_keys) != 1:
+                # If the number of input and target keys is the same, assume they are paired
+                for i, (in_key, target_key) in enumerate(zip(input_keys, target_keys)):
+                    figs = get_fig_dict(
+                        input_data=batch[in_key],
+                        target_data=batch[target_key],
+                        outputs=outputs[i],
+                        classes=classes,
+                    )
+                    array_name = longest_common_substring(in_key, target_key)
+                    for name, fig in figs.items():
+                        writer.add_figure(f"{name}: {array_name}", fig, n_iter)
+                        plt.close(fig)
 
-        else:
-            # If the number of input and target keys is not the same, assume that only the first input and target keys match
-            if isinstance(outputs, list):
-                outputs = outputs[0]
-            if isinstance(inputs, dict):
-                inputs = list(inputs.values())[0]
-            elif isinstance(inputs, list):
-                inputs = inputs[0]
-            if isinstance(targets, dict):
-                targets = list(targets.values())[0]
-            elif isinstance(targets, list):
-                targets = targets[0]
-            figs = get_fig_dict(inputs, targets, outputs, classes)
-            for name, fig in figs.items():
-                writer.add_figure(name, fig, n_iter)
-                plt.close(fig)
+            else:
+                # If the number of input and target keys is not the same, assume that only the first input and target keys match
+                if isinstance(outputs, list):
+                    outputs = outputs[0]
+                if isinstance(inputs, dict):
+                    inputs = list(inputs.values())[0]
+                elif isinstance(inputs, list):
+                    inputs = inputs[0]
+                if isinstance(targets, dict):
+                    targets = list(targets.values())[0]
+                elif isinstance(targets, list):
+                    targets = targets[0]
+                figs = get_fig_dict(inputs, targets, outputs, classes)
+                for name, fig in figs.items():
+                    writer.add_figure(name, fig, n_iter)
+                    plt.close(fig)
 
         # Clear the GPU memory again
         torch.cuda.empty_cache()
 
-    # Close the summarywriter
-    writer.close()
+    # Close the summarywriter (only on main process)
+    if writer is not None:
+        writer.close()
 
     # %%

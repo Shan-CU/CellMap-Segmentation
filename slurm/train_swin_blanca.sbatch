@@ -60,8 +60,10 @@ TB_LOGDIR="$SLURM_SUBMIT_DIR/tensorboard"
 tensorboard --logdir=$TB_LOGDIR --port=$TB_PORT --bind_all &
 TB_PID=$!
 
-echo "Starting SwinTransformer training..."
-python examples/train_swin_baseline.py
+echo "Starting SwinTransformer training with DDP (torchrun)..."
+N_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
+torchrun --standalone --nproc_per_node=$N_GPUS examples/train_swin_baseline.py
 TRAIN_EXIT_CODE=$?
 
 echo "Stopping TensorBoard..."
