@@ -69,9 +69,12 @@ tensorboard --logdir=$TB_LOGDIR --port=$TB_PORT --bind_all &
 TB_PID=$!
 echo "TensorBoard PID: $TB_PID"
 
-# Run training
-echo "Starting UNet training..."
-python examples/train_unet_baseline.py
+# Run training with torchrun for DDP
+# torchrun handles process spawning and environment variable setup for DDP
+echo "Starting UNet training with DDP (torchrun)..."
+N_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
+torchrun --standalone --nproc_per_node=$N_GPUS examples/train_unet_baseline.py
 TRAIN_EXIT_CODE=$?
 
 # Cleanup TensorBoard

@@ -24,6 +24,35 @@ For example, to train a 3D model using the configuration file `train_3D.py`, you
 csc train train_3D.py
 ```
 
+### Multi-GPU Training with DDP (Distributed Data Parallel)
+
+For multi-GPU training, we use PyTorch's DistributedDataParallel (DDP) instead of DataParallel. DDP is preferred because:
+- **Better scaling**: One process per GPU avoids Python's GIL bottleneck
+- **Efficient gradient synchronization**: Uses NCCL for optimized all-reduce operations
+- **Lower memory overhead**: Each process holds only its own gradients
+- **Better batch distribution**: Data is properly distributed across processes
+
+To run training with DDP on multiple GPUs, use `torchrun`:
+
+```bash
+# Example: Run on 3 GPUs
+torchrun --standalone --nproc_per_node=3 examples/train_unet_baseline.py
+
+# Example: Run on all available GPUs
+torchrun --standalone --nproc_per_node=$(nvidia-smi -L | wc -l) examples/train_unet_baseline.py
+```
+
+The baseline training configs (`train_unet_baseline.py`, `train_swin_baseline.py`, `train_unet3d_baseline.py`) are pre-configured for DDP and will automatically:
+- Initialize the DDP process group
+- Wrap the model with `DistributedDataParallel`
+- Log/save only on the main process (rank 0)
+- Clean up the process group on exit
+
+For single-GPU training, you can still run the scripts directly with Python (DDP will be skipped):
+```bash
+python examples/train_unet_baseline.py
+```
+
 Training progress can be monitored using TensorBoard by running `tensorboard --logdir tensorboard` in the terminal.
 
 Once the model is trained, you can use the `predict` function to make predictions on new data using the trained model. See the `predict_3D.py` and `predict_2D.py` scripts (and below) for examples of how to use the `predict` function.

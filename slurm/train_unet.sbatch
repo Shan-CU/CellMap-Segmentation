@@ -20,7 +20,8 @@
 # Hardware: aa100 partition - 3x NVIDIA A100 80GB, 64 cores, 243GB RAM
 # Resource Request: 3 GPUs, 32 CPUs, 192GB RAM
 # Optimizations:
-#   - 3 GPUs with DataParallel for ~3x throughput
+#   - 3 GPUs with DistributedDataParallel (DDP) for ~3x throughput
+#   - DDP is preferred over DataParallel for better scaling
 #   - 32 CPU cores for parallel data loading
 #   - Local scratch ($SLURM_SCRATCH) for fastest I/O
 #   - Mixed precision (AMP) for TensorCore acceleration
@@ -108,9 +109,12 @@ tensorboard --logdir=$TB_LOGDIR --port=$TB_PORT --bind_all &
 TB_PID=$!
 echo "TensorBoard PID: $TB_PID"
 
-# Run training
-echo "Starting UNet training..."
-python examples/train_unet_baseline.py
+# Run training with torchrun for DDP
+# torchrun handles process spawning and environment variable setup for DDP
+echo "Starting UNet training with DDP (torchrun)..."
+N_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
+torchrun --standalone --nproc_per_node=$N_GPUS examples/train_unet_baseline.py
 TRAIN_EXIT_CODE=$?
 
 # Cleanup TensorBoard

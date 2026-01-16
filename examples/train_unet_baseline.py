@@ -1,13 +1,19 @@
-# UNet Baseline Training Config (Optimized for Alpine A100)
-# Run with: python train_unet_baseline.py
+# UNet Baseline Training Config with DDP (Optimized for Alpine A100)
+# Run with: torchrun --nproc_per_node=3 examples/train_unet_baseline.py
 # Monitor with: tensorboard --logdir tensorboard
 #
 # ALPINE A100 OPTIMIZATIONS:
-#   - 3x A100 80GB GPUs with DataParallel
-#   - 16 CPU workers for parallel data loading
+#   - 3x A100 80GB GPUs with DistributedDataParallel (DDP)
+#   - DDP is preferred over DataParallel for better scaling
+#   - 16 CPU workers for parallel data loading per process
 #   - Mixed precision (AMP) for TensorCore acceleration
-#   - Larger batch sizes (A100 80GB can handle it)
 #   - pin_memory + persistent_workers for fast data transfer
+#
+# DDP ADVANTAGES OVER DATAPARALLEL:
+#   - One process per GPU avoids Python GIL bottleneck
+#   - Efficient gradient synchronization via NCCL all-reduce
+#   - Lower memory overhead (each process holds only its gradients)
+#   - Better batch distribution across processes
 #
 # Based on Lauenburg & eminorhan winning configs:
 #   - Frequent validation for better learning signal
@@ -15,21 +21,35 @@
 #   - Gradient clipping for stability
 #   - AdamW optimizer with weight decay
 
+import os
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from upath import UPath
 from cellmap_segmentation_challenge.models import UNet_2D
 from cellmap_segmentation_challenge.utils import get_tested_classes
+from cellmap_segmentation_challenge.utils.ddp import (
+    setup_ddp, cleanup_ddp, is_main_process, get_world_size, get_local_rank
+)
+
+# ============================================================
+# DDP SETUP - Must be called before any CUDA operations
+# ============================================================
+local_rank, world_size = setup_ddp()
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 # %% Hyperparameters - Optimized for 24-HOUR Alpine A100 training
 learning_rate = 1e-4  # Peak LR after warmup
 
 # Batch size optimized for multi-GPU A100 (80GB VRAM each)
 # A100 80GB can handle large batches - UNet is memory efficient
-n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+# With DDP, each GPU gets its own batch_size (no multiplication needed)
+n_gpus = world_size if world_size > 0 else 1
 batch_size_per_gpu = 32  # A100 80GB can handle 32 for 256x256 UNet
-batch_size = batch_size_per_gpu * n_gpus  # 96 total with 3 GPUs
-gradient_accumulation_steps = 2  # Effective batch = 96 * 2 = 192
-print(f"Using {n_gpus} GPU(s), batch_size={batch_size}, effective_batch={batch_size * gradient_accumulation_steps}")
+batch_size = batch_size_per_gpu  # Per-GPU batch size (DDP distributes across processes)
+gradient_accumulation_steps = 2  # Effective batch per GPU = 32 * 2 = 64, total = 64 * n_gpus
+if is_main_process():
+    print(f"Using {n_gpus} GPU(s) with DDP, batch_size_per_gpu={batch_size}, effective_batch_total={batch_size * gradient_accumulation_steps * n_gpus}")
 
 input_array_info = {
     "shape": (1, 256, 256),  # 256x256 is optimal for batch size
@@ -55,7 +75,8 @@ classes = [
     'golgi_mem', 'golgi_lum', 'ves_mem', 'ves_lum',
     'endo_mem', 'endo_lum', 'er_mem', 'er_lum', 'nuc'
 ]
-print(f"Training UNet baseline with {len(classes)} classes: {classes}")
+if is_main_process():
+    print(f"Training UNet baseline with {len(classes)} classes: {classes}")
 
 # Model - UNet baseline
 model_name = "unet_baseline"
@@ -63,18 +84,22 @@ model_to_load = "unet_baseline"
 _model = UNet_2D(1, len(classes))
 
 # ============================================================
-# MULTI-GPU: Wrap model with DataParallel if multiple GPUs available
+# DDP: Wrap model with DistributedDataParallel
 # ============================================================
-if n_gpus > 1:
-    print(f"Using DataParallel with {n_gpus} GPUs")
-    model = torch.nn.DataParallel(_model)
+# Move model to the correct device first
+_model = _model.to(device)
+
+if world_size > 1:
+    if is_main_process():
+        print(f"Using DistributedDataParallel with {n_gpus} GPUs")
+    model = DDP(_model, device_ids=[local_rank], output_device=local_rank)
 else:
     model = _model
 
 load_model = "latest"
 
 # Optimizer: AdamW with weight decay (better than RAdam for this task)
-# Note: Use _model.parameters() to get actual model params (not DataParallel wrapper)
+# Note: Use _model.parameters() to get actual model params (not DDP wrapper)
 optimizer = torch.optim.AdamW(
     _model.parameters(), 
     lr=learning_rate,
@@ -134,7 +159,8 @@ force_all_classes = False
 # persistent_workers=True keeps workers alive between epochs (reduces overhead)
 # multiprocessing_context="spawn" is REQUIRED for CUDA - fork doesn't work!
 n_workers = 16  # Hardcoded for Alpine (SLURM sets 32 CPUs, use half for dataloading)
-print(f"Using {n_workers} dataloader workers")
+if is_main_process():
+    print(f"Using {n_workers} dataloader workers per process")
 
 dataloader_kwargs = {
     "num_workers": n_workers,
@@ -148,6 +174,18 @@ dataloader_kwargs = {
 # ============================================================
 use_mixed_precision = True  # Enable AMP for ~2x speedup on A100
 
+# ============================================================
+# DDP-SPECIFIC SETTINGS
+# ============================================================
+# These are used by the train function to enable DDP-specific behavior
+use_ddp = world_size > 1  # Enable DDP mode in training
+ddp_local_rank = local_rank  # GPU index for this process
+ddp_world_size = world_size  # Total number of processes
+
 if __name__ == "__main__":
     from cellmap_segmentation_challenge import train
-    train(__file__)
+    try:
+        train(__file__)
+    finally:
+        # Clean up DDP process group
+        cleanup_ddp()

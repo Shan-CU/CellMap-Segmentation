@@ -79,9 +79,12 @@ export CELLMAP_RUN_NAME=$RUN_NAME
 export CELLMAP_CHECKPOINT_DIR="checkpoints/$RUN_NAME"
 export CELLMAP_TENSORBOARD_DIR="tensorboard/$RUN_NAME"
 
-# Run training
-echo "Starting UNet training (Run 2)..."
-python examples/train_unet_baseline.py
+# Run training with torchrun for DDP
+# torchrun handles process spawning and environment variable setup for DDP
+echo "Starting UNet training (Run 2) with DDP (torchrun)..."
+N_GPUS=$(nvidia-smi -L | wc -l)
+echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
+torchrun --standalone --nproc_per_node=$N_GPUS examples/train_unet_baseline.py
 TRAIN_EXIT_CODE=$?
 
 # Cleanup TensorBoard
