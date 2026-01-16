@@ -21,6 +21,7 @@
 #   - Gradient clipping for stability
 #   - AdamW optimizer with weight decay
 
+import multiprocessing
 import os
 import torch
 import torch.distributed as dist
@@ -34,9 +35,18 @@ from cellmap_segmentation_challenge.utils.ddp import (
 
 # ============================================================
 # DDP SETUP - Must be called before any CUDA operations
+# Skip DDP setup in DataLoader worker processes (spawned by multiprocessing)
 # ============================================================
-local_rank, world_size = setup_ddp()
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+_is_worker = multiprocessing.parent_process() is not None
+
+if not _is_worker:
+    local_rank, world_size = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+else:
+    # DataLoader worker - just read env vars, don't initialize DDP
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    device = torch.device("cpu")  # Workers don't need GPU
 
 # %% Hyperparameters - Optimized for 24-HOUR Alpine A100 training
 learning_rate = 1e-4  # Peak LR after warmup
