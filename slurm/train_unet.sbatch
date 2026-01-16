@@ -38,9 +38,8 @@ echo "=========================================="
 # Go to project directory
 cd $SLURM_SUBMIT_DIR
 
-# Load modules (slurm/alpine is required for Alpine cluster)
+# Load modules
 module purge
-module load slurm/alpine
 module load anaconda
 
 # Activate your conda environment
