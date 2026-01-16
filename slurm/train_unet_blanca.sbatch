@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=unet_blanca
-#SBATCH --partition=blanca-biokem
 #SBATCH --qos=preemptable
+#SBATCH --account=ucb-general
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
