@@ -71,8 +71,8 @@ def setup_ddp(backend: str = "nccl") -> Tuple[int, int]:
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
     
-    # Only initialize if world_size > 1 (multi-GPU)
-    if world_size > 1:
+    # Only initialize if world_size > 1 (multi-GPU) AND not already initialized
+    if world_size > 1 and not dist.is_initialized():
         # Set the device before initializing process group
         torch.cuda.set_device(local_rank)
         
@@ -89,6 +89,9 @@ def setup_ddp(backend: str = "nccl") -> Tuple[int, int]:
         
         if is_main_process():
             print(f"DDP initialized: {world_size} processes, backend={backend}")
+    elif world_size > 1:
+        # Already initialized, just set the device
+        torch.cuda.set_device(local_rank)
     else:
         if torch.cuda.is_available():
             torch.cuda.set_device(0)
