@@ -14,7 +14,6 @@
 #   - Gradient clipping for stability
 #   - AdamW optimizer (essential for transformers)
 
-import os
 import torch
 from upath import UPath
 from cellmap_segmentation_challenge.models import SwinTransformer
@@ -135,7 +134,7 @@ force_all_classes = False
 # pin_memory=False because cellmap-data moves data to GPU internally
 # persistent_workers=True keeps workers alive between epochs (reduces overhead)
 # multiprocessing_context="spawn" is REQUIRED for CUDA - fork doesn't work!
-n_workers = int(os.environ.get('SLURM_CPUS_PER_TASK', 8))
+n_workers = 16  # Hardcoded for Alpine (SLURM sets 32 CPUs, use half for dataloading)
 print(f"Using {n_workers} dataloader workers")
 
 dataloader_kwargs = {
