@@ -145,17 +145,21 @@ filter_by_scale = True
 # Dataset handling
 force_all_classes = False
 
-# Dataloader - fewer workers for 3D (more memory per sample)
-n_workers = 8  # Reduced from 16 due to 3D memory
+# ============================================================
+# DATALOADER CONFIGURATION
+# ============================================================
+# Note: num_workers=0 is required for DDP because:
+# - fork: Can't re-initialize CUDA in forked subprocess
+# - spawn: Workers re-execute the script and try to init DDP again
+# The cellmap_data library creates CUDA tensors in workers, which breaks both.
+# Data loading will be slower but training will work correctly.
+n_workers = 0
 if is_main_process():
-    print(f"Using {n_workers} dataloader workers per process")
+    print(f"Using {n_workers} dataloader workers (DDP compatibility mode)")
 
 dataloader_kwargs = {
     "num_workers": n_workers,
     "pin_memory": False,
-    "persistent_workers": True if n_workers > 0 else False,
-    # Don't use spawn with DDP - it causes workers to re-init DDP
-    # Fork is the default and works fine with DDP since each rank is a separate process
 }
 
 # Mixed precision - critical for 3D to fit in memory

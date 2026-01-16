@@ -164,22 +164,20 @@ filter_by_scale = True
 force_all_classes = False
 
 # ============================================================
-# ALPINE A100 DATALOADER OPTIMIZATIONS
+# DATALOADER CONFIGURATION
 # ============================================================
-# Use 16 CPU cores for parallel data loading (set in SLURM script)
-# pin_memory=False because cellmap-data moves data to GPU internally
-# persistent_workers=True keeps workers alive between epochs (reduces overhead)
-# multiprocessing_context="spawn" is REQUIRED for CUDA - fork doesn't work!
-n_workers = 16  # Hardcoded for Alpine (SLURM sets 32 CPUs, use half for dataloading)
+# Note: num_workers=0 is required for DDP because:
+# - fork: Can't re-initialize CUDA in forked subprocess
+# - spawn: Workers re-execute the script and try to init DDP again
+# The cellmap_data library creates CUDA tensors in workers, which breaks both.
+# Data loading will be slower but training will work correctly.
+n_workers = 0
 if is_main_process():
-    print(f"Using {n_workers} dataloader workers per process")
+    print(f"Using {n_workers} dataloader workers (DDP compatibility mode)")
 
 dataloader_kwargs = {
     "num_workers": n_workers,
-    "pin_memory": False,  # cellmap-data moves data to GPU, can't pin CUDA tensors
-    "persistent_workers": True if n_workers > 0 else False,
-    # Don't use spawn with DDP - it causes workers to re-init DDP
-    # Fork is the default and works fine with DDP since each rank is a separate process
+    "pin_memory": False,
 }
 
 # ============================================================
