@@ -1,16 +1,7 @@
 #!/bin/bash
-
-# === Blanca-ready Slurm script for SwinTransformer training ===
-# Replace the PARTITION, ACCOUNT and EMAIL variables below for your Blanca project
-
-## User-configurable variables (edit before submitting)
-PARTITION="blanca-biokem"   # using biokem (2x A100 per node)
-ACCOUNT="ucb-general"       # your Blanca account/project
-EMAIL="shku2971@colorado.edu"    # mail notifications
-
 #SBATCH --job-name=swin_baseline_blanca
-#SBATCH --partition=blanca-biokem   # biokem partition (2x A100 per node)
-#SBATCH --account=ucb-general       # account to charge
+#SBATCH --partition=blanca-biokem
+#SBATCH --account=ucb-general
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -22,6 +13,12 @@ EMAIL="shku2971@colorado.edu"    # mail notifications
 #SBATCH --error=logs/swin_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=shku2971@colorado.edu
+
+# === Blanca-ready Slurm script for SwinTransformer training ===
+# User-configurable variables (kept for convenience)
+PARTITION="blanca-biokem"   # using biokem (2x A100 per node)
+ACCOUNT="ucb-general"       # your Blanca account/project
+EMAIL="shku2971@colorado.edu"    # mail notifications
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
