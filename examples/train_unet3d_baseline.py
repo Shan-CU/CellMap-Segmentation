@@ -154,7 +154,8 @@ dataloader_kwargs = {
     "num_workers": n_workers,
     "pin_memory": False,
     "persistent_workers": True if n_workers > 0 else False,
-    "multiprocessing_context": "spawn" if n_workers > 0 else None,
+    # Don't use spawn with DDP - it causes workers to re-init DDP
+    # Fork is the default and works fine with DDP since each rank is a separate process
 }
 
 # Mixed precision - critical for 3D to fit in memory
