@@ -1,24 +1,29 @@
 #!/bin/bash
 
-#SBATCH --job-name=unet3d_baseline
+#SBATCH --job-name=vit3d_baseline
 #SBATCH --partition=aa100
 #SBATCH --account=ucb-general
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:3
 #SBATCH --mem=192G
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/unet3d_%j.out
-#SBATCH --error=logs/unet3d_%j.err
+#SBATCH --output=logs/vit3d_%j.out
+#SBATCH --error=logs/vit3d_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=george.stephenson@colorado.edu
 
 # ============================================================
-# CellMap UNet 3D Baseline Training on Alpine
-# 3D model processes volumetric data (32×256×256 chunks)
-# Uses more memory but captures 3D context of organelles
+# CellMap ViT-V-Net 3D Baseline Training on Alpine (24-HOUR OPTIMIZED)
+# Hardware: aa100 partition - 3x NVIDIA A100 80GB, 64 cores, 243GB RAM
+# Resource Request: 3 GPUs, 32 CPUs, 192GB RAM
+# Optimizations:
+#   - 3 GPUs with DistributedDataParallel (DDP) for ~3x throughput
+#   - 3D Vision Transformer for volumetric context
+#   - Mixed precision (AMP) essential for 3D ViT memory
+#   - Gradient accumulation for large effective batch size
 # ============================================================
 
 echo "=========================================="
@@ -39,6 +44,7 @@ source /curc/sw/anaconda3/2023.09/etc/profile.d/conda.sh
 # Activate conda environment
 conda activate /projects/$USER/software/anaconda/envs/cellmap || {
     echo "ERROR: Failed to activate conda environment"
+    echo "Available envs: $(ls /projects/$USER/software/anaconda/envs/ 2>/dev/null || echo 'none found')"
     exit 1
 }
 
@@ -54,9 +60,8 @@ done
 # Create directories
 mkdir -p logs tensorboard checkpoints
 
-# Set environment variables
+# Set environment variables for optimal performance
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-# Note: expandable_segments:True causes CUDA IPC errors on Alpine kernel
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 
 # ============================================================
@@ -82,11 +87,10 @@ TB_PID=$!
 echo "TensorBoard PID: $TB_PID"
 
 # Run training with torchrun for DDP
-# torchrun handles process spawning and environment variable setup for DDP
-echo "Starting UNet 3D training with DDP (torchrun)..."
+echo "Starting ViT-V-Net 3D training with DDP (torchrun)..."
 N_GPUS=$(nvidia-smi -L | wc -l)
 echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
-torchrun --standalone --nproc_per_node=$N_GPUS examples/train_unet3d_baseline.py
+torchrun --standalone --nproc_per_node=$N_GPUS examples/train_vit3d_baseline.py
 TRAIN_EXIT_CODE=$?
 
 # Cleanup
