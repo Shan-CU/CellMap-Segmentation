@@ -39,9 +39,9 @@ echo "=========================================="
 # Go to project directory
 cd $SLURM_SUBMIT_DIR
 
-# Load modules
+# Load modules - use source for conda initialization
 module purge
-module load anaconda
+source /curc/sw/anaconda3/latest/etc/profile.d/conda.sh
 
 # Activate your conda environment
 # The environment should be at /projects/$USER/software/anaconda/envs/cellmap
