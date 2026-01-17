@@ -8,7 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:3
-#SBATCH --mem=240G
+#SBATCH --mem=235G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/vit3d_%j.out
 #SBATCH --error=logs/vit3d_%j.err
