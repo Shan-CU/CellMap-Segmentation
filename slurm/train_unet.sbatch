@@ -41,7 +41,7 @@ cd $SLURM_SUBMIT_DIR
 
 # Load modules - use source for conda initialization
 module purge
-source /curc/sw/anaconda3/latest/etc/profile.d/conda.sh
+source /curc/sw/anaconda3/2023.09/etc/profile.d/conda.sh
 
 # Activate your conda environment
 # The environment should be at /projects/$USER/software/anaconda/envs/cellmap
