@@ -45,12 +45,12 @@ else:
 learning_rate = 1e-4  # Peak LR after warmup
 
 # Batch size - 3D ViT uses MUCH more memory than 3D UNet
-# A100 80GB can handle batch=2-3 per GPU for 128×128×128 volumes
+# A100 80GB can handle batch=1 per GPU for 128×128×128 volumes (reduced to avoid OOM)
 # With DDP, each GPU gets its own batch_size
 n_gpus = world_size if world_size > 0 else 1
-batch_size_per_gpu = 2  # Very small due to ViT memory requirements
+batch_size_per_gpu = 1  # Reduced from 2 to avoid OOM
 batch_size = batch_size_per_gpu  # Per-GPU batch size
-gradient_accumulation_steps = 16  # Effective batch per GPU = 2 * 16 = 32, total = 32 * n_gpus
+gradient_accumulation_steps = 32  # Effective batch per GPU = 1 * 32 = 32, total = 32 * n_gpus
 if is_main_process():
     print(f"Using {n_gpus} GPU(s) with DDP, batch_size_per_gpu={batch_size}, effective_batch_total={batch_size * gradient_accumulation_steps * n_gpus}")
 

@@ -46,12 +46,12 @@ else:
 learning_rate = 1e-4  # Peak LR after warmup
 
 # Batch size - 3D uses MUCH more memory than 2D
-# A100 80GB can handle batch=4 per GPU for 32×256×256 volumes
+# A100 80GB can handle batch=2 per GPU for 32×256×256 volumes (reduced to avoid OOM)
 # With DDP, each GPU gets its own batch_size (no multiplication needed)
 n_gpus = world_size if world_size > 0 else 1
-batch_size_per_gpu = 4  # Small due to 3D memory requirements
+batch_size_per_gpu = 2  # Reduced from 4 to avoid OOM
 batch_size = batch_size_per_gpu  # Per-GPU batch size (DDP distributes across processes)
-gradient_accumulation_steps = 8  # Effective batch per GPU = 4 * 8 = 32, total = 32 * n_gpus
+gradient_accumulation_steps = 16  # Effective batch per GPU = 2 * 16 = 32, total = 32 * n_gpus
 if is_main_process():
     print(f"Using {n_gpus} GPU(s) with DDP, batch_size_per_gpu={batch_size}, effective_batch_total={batch_size * gradient_accumulation_steps * n_gpus}")
 
