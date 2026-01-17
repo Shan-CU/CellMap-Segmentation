@@ -110,7 +110,11 @@ _model = _model.to(device)
 if world_size > 1:
     if is_main_process():
         print(f"Using DistributedDataParallel with {n_gpus} GPUs")
-    model = DDP(_model, device_ids=[local_rank], output_device=local_rank)
+    # find_unused_parameters=True is required for SwinTransformer because some
+    # parameters (e.g., relative position bias tables) may not receive gradients
+    # for every input, depending on the input size and window configuration.
+    model = DDP(_model, device_ids=[local_rank], output_device=local_rank, 
+                find_unused_parameters=True)
 else:
     model = _model
 
