@@ -11,3 +11,5 @@ from .unet_model_2D import UNet_2D
 from .unet_model_3D import UNet_3D
 from .vitnet import ViTVNet
 from .SwinTransformerBlock import SwinTransformer, SwinTransformerBlock, SwinTransformerBlockV2
+from .swin_transformer_3d import SwinTransformer3D
+from .vit_2d import ViTVNet2D, get_vit_config_2d
