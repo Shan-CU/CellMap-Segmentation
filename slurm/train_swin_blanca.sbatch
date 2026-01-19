@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=swin_baseline_blanca
 #SBATCH --partition=blanca-biokem
-#SBATCH --account=ucb-general
-#SBATCH --qos=normal
+#SBATCH --account=blanca-biokem
+#SBATCH --qos=blanca-biokem
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -31,7 +31,22 @@ cd $SLURM_SUBMIT_DIR
 # --- Load modules or environment manager available on Blanca ---
 module purge
 # Example: module load miniconda/23-11  # adjust to Blanca's module name
-module load anaconda || true
+module load anaconda 2>/dev/null || true
+
+# If the module system doesn't expose Anaconda on this node, fall back to a user install.
+if ! command -v conda >/dev/null 2>&1; then
+    if [ -f "$HOME/software/anaconda/etc/profile.d/conda.sh" ]; then
+        source "$HOME/software/anaconda/etc/profile.d/conda.sh"
+    elif [ -f "$HOME/software/anaconda/bin/activate" ]; then
+        # Older installs sometimes only ship the activate script.
+        source "$HOME/software/anaconda/bin/activate"
+    fi
+fi
+
+if ! command -v conda >/dev/null 2>&1; then
+    echo "ERROR: conda not found. Load a conda module or install conda under ~/software/anaconda." >&2
+    exit 2
+fi
 
 # Activate conda environment. Update the path if you install elsewhere.
 conda activate /projects/$USER/software/anaconda/envs/cellmap || {

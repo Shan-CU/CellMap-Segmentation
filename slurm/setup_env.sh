@@ -4,9 +4,22 @@
 # Run this ONCE to set up your conda environment
 # ============================================================
 
-# Load anaconda module
+# Load anaconda module if available; otherwise fall back to user install.
 module purge
-module load anaconda
+module load anaconda 2>/dev/null || true
+
+if ! command -v conda >/dev/null 2>&1; then
+	if [ -f "$HOME/software/anaconda/etc/profile.d/conda.sh" ]; then
+		source "$HOME/software/anaconda/etc/profile.d/conda.sh"
+	elif [ -f "$HOME/software/anaconda/bin/activate" ]; then
+		source "$HOME/software/anaconda/bin/activate"
+	fi
+fi
+
+if ! command -v conda >/dev/null 2>&1; then
+	echo "ERROR: conda not found. Run this inside a Blanca compute job, or install conda under ~/software/anaconda." >&2
+	exit 2
+fi
 
 # Create environment in /projects (more storage than /home)
 echo "Creating cellmap environment..."
