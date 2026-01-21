@@ -75,7 +75,7 @@ if [ -f "$HOME/.bashrc" ]; then
 fi
 
 conda activate cellmap 2>/dev/null || \
-    conda activate /projects/$USER/software/anaconda/envs/cellmap 2>/dev/null || \
+    conda activate /projects/shku2971/software/anaconda/envs/cellmap 2>/dev/null || \
     source activate cellmap 2>/dev/null || {
         echo "ERROR: Could not activate cellmap environment"
         exit 1
