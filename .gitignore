@@ -183,7 +183,7 @@ tensorboard/
 .vscode
 
 # Challenge specific files
-data/*
+data/
 datasplit.csv
 result.json
 result_submitted_only.json
