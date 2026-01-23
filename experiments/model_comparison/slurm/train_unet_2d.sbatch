@@ -64,20 +64,27 @@ mkdir -p experiments/model_comparison/tensorboard
 mkdir -p experiments/model_comparison/visualizations
 mkdir -p experiments/model_comparison/metrics
 
-# Load Blanca-specific Slurm module
+# Load Blanca-specific modules
 module purge
 module load slurm/blanca
+module load anaconda
 
-# Activate conda environment
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
+# Initialize conda if not already done (required on Blanca compute nodes)
+if ! command -v conda &> /dev/null; then
+    if [ -f "/curc/sw/anaconda3/latest/etc/profile.d/conda.sh" ]; then
+        source "/curc/sw/anaconda3/latest/etc/profile.d/conda.sh"
+    elif [ -f "$HOME/software/anaconda/etc/profile.d/conda.sh" ]; then
+        source "$HOME/software/anaconda/etc/profile.d/conda.sh"
+    fi
 fi
 
-# Try multiple conda activation methods
+# Activate conda environment - try user environment first, then project location
 conda activate cellmap 2>/dev/null || \
-    conda activate /projects/shku2971/software/anaconda/envs/cellmap 2>/dev/null || \
-    source activate cellmap 2>/dev/null || {
+    conda activate /projects/$USER/software/anaconda/envs/cellmap 2>/dev/null || \
+    conda activate /projects/shku2971/software/anaconda/envs/cellmap 2>/dev/null || {
         echo "ERROR: Could not activate cellmap environment"
+        echo "Please ensure the environment exists. Create it with:"
+        echo "  conda create -n cellmap python=3.10 pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia"
         exit 1
     }
 
