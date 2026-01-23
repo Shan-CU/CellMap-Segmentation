@@ -66,27 +66,29 @@ mkdir -p experiments/model_comparison/metrics
 
 # Load Blanca-specific modules
 module purge
-module load slurm/blanca
-module load anaconda
+# Example: module load miniconda/23-11  # adjust to Blanca's module name
+module load anaconda 2>/dev/null || true
 
-# Initialize conda if not already done (required on Blanca compute nodes)
-if ! command -v conda &> /dev/null; then
-    if [ -f "/curc/sw/anaconda3/latest/etc/profile.d/conda.sh" ]; then
-        source "/curc/sw/anaconda3/latest/etc/profile.d/conda.sh"
-    elif [ -f "$HOME/software/anaconda/etc/profile.d/conda.sh" ]; then
+# If the module system doesn't expose Anaconda on this node, fall back to a user install.
+if ! command -v conda >/dev/null 2>&1; then
+    if [ -f "$HOME/software/anaconda/etc/profile.d/conda.sh" ]; then
         source "$HOME/software/anaconda/etc/profile.d/conda.sh"
+    elif [ -f "$HOME/software/anaconda/bin/activate" ]; then
+        source "$HOME/software/anaconda/bin/activate"
     fi
 fi
 
-# Activate conda environment - try user environment first, then project location
-conda activate cellmap 2>/dev/null || \
-    conda activate /projects/$USER/software/anaconda/envs/cellmap 2>/dev/null || \
-    conda activate /projects/shku2971/software/anaconda/envs/cellmap 2>/dev/null || {
-        echo "ERROR: Could not activate cellmap environment"
-        echo "Please ensure the environment exists. Create it with:"
-        echo "  conda create -n cellmap python=3.10 pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia"
-        exit 1
-    }
+if ! command -v conda >/dev/null 2>&1; then
+    echo "ERROR: conda not found. Load a conda module or install conda under ~/software/anaconda." >&2
+    exit 2
+fi
+
+# Activate conda environment. Update the path if you install elsewhere.
+conda activate /projects/$USER/software/anaconda/envs/cellmap || {
+    echo "WARNING: Failed to activate /projects/$USER/software/anaconda/envs/cellmap"
+    echo "Attempting to activate by name: cellmap"
+    conda activate cellmap || true
+}
 
 echo "Python: $(which python)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null)"
