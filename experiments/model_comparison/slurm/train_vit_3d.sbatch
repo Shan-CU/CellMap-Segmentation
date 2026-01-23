@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:a100:2
 #SBATCH --mem=480G
-#SBATCH --time=2-00:00:00
+#SBATCH --time=7-00:00:00
 #SBATCH --output=logs/vit_3d_%j.out
 #SBATCH --error=logs/vit_3d_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
