@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:a100:2
 #SBATCH --mem=192G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=logs/unet3d_blanca_%j.out
