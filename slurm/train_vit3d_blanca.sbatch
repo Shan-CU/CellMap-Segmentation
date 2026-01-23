@@ -12,7 +12,7 @@
 #SBATCH --output=logs/vit3d_blanca_%j.out
 #SBATCH --error=logs/vit3d_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=shku2971@colorado.edu
+#SBATCH --mail-user=george.stephenson@colorado.edu
 
 # === Blanca-ready Slurm script for ViT-V-Net 3D training ===
 # 3D Vision Transformer for volumetric context

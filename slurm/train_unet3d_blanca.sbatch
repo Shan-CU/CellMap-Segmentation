@@ -12,7 +12,7 @@
 #SBATCH --output=logs/unet3d_blanca_%j.out
 #SBATCH --error=logs/unet3d_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=shku2971@colorado.edu
+#SBATCH --mail-user=george.stephenson@colorado.edu
 
 # === Blanca-ready Slurm script for UNet3D training ===
 # 3D model processes volumetric data (32×256×256 chunks)

@@ -12,13 +12,13 @@
 #SBATCH --output=logs/swin_blanca_%j.out
 #SBATCH --error=logs/swin_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=shku2971@colorado.edu
+#SBATCH --mail-user=george.stephenson@colorado.edu
 
 # === Blanca-ready Slurm script for SwinTransformer training ===
 # User-configurable variables (kept for convenience)
 PARTITION="blanca-biokem"   # using biokem (2x A100 per node)
 ACCOUNT="ucb-general"       # your Blanca account/project
-EMAIL="shku2971@colorado.edu"    # mail notifications
+EMAIL="george.stephenson@colorado.edu"    # mail notifications
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"

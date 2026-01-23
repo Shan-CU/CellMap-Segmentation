@@ -12,13 +12,13 @@
 #SBATCH --output=logs/unet_blanca_%j.out
 #SBATCH --error=logs/unet_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=shku2971@colorado.edu
+#SBATCH --mail-user=george.stephenson@colorado.edu
 
 # === Blanca-ready Slurm script for UNet training ===
 # User-configurable variables (kept for convenience)
 PARTITION="blanca-biokem"   # e.g. blanca-biokem (2x A100 per node)
 ACCOUNT="ucb-general"         # your Blanca account/project name
-EMAIL="shku2971@colorado.edu"    # mail notifications
+EMAIL="george.stephenson@colorado.edu"    # mail notifications
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
