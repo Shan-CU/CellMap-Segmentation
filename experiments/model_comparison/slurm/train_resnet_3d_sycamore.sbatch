@@ -76,13 +76,17 @@ echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/d
 echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
-# H100 Optimizations for 3D models
+# H100 Optimizations for 3D models (Updated for maximum performance)
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
+export CUDA_MODULE_LOADING=LAZY
 export NCCL_DEBUG=WARN
 export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
 export NVIDIA_TF32_OVERRIDE=1
+export TORCH_CUDNN_V8_API_ENABLED=1
+export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 
 # NVLink optimizations
 export NCCL_P2P_LEVEL=NVL
@@ -111,7 +115,10 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 2 \
+    --num_workers 4 \
+    --pin_memory \
+    --amp \
+    --compile \
     --save_features \
     --vis_every 5
 

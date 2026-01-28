@@ -82,16 +82,22 @@ echo "CUDA version: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # ============================================================
-# H100 Optimizations
+# H100 Optimizations (Updated for maximum performance)
 # ============================================================
-export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))  # Half CPUs for OMP, rest for dataloader
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
+export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))  # 16 threads for OMP
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
+export CUDA_MODULE_LOADING=LAZY  # Faster CUDA initialization
 export NCCL_DEBUG=WARN
 export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
 
-# H100-specific: Enable TF32 for matmul (no accuracy loss, faster)
+# H100-specific optimizations
 export NVIDIA_TF32_OVERRIDE=1
+export TORCH_CUDNN_V8_API_ENABLED=1
+
+# torch.compile cache directory (faster subsequent runs)
+export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 
 # Sycamore uses /work for high-throughput I/O (already optimal)
 echo "Data directory: $PROJECT_ROOT/data"
@@ -121,7 +127,10 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 4 \
+    --num_workers 12 \
+    --pin_memory \
+    --amp \
+    --compile \
     --save_features \
     --vis_every 10
 

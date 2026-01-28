@@ -42,11 +42,13 @@ INPUT_SHAPE_2D = (1, 256, 256)
 INPUT_SCALE_2D = (8, 8, 8)
 
 # Training settings for 2D
+# Batch sizes optimized for H100 80GB with AMP (BFloat16)
+# With mixed precision, memory usage is ~50% lower, allowing larger batches
 BATCH_SIZE_2D = {
-    'unet': 32,         # UNet is memory efficient
-    'resnet': 24,       # ResNet uses more memory
-    'swin': 16,         # Transformers need more memory
-    'vit': 8,           # ViT needs significant memory
+    'unet': 64,         # H100 + AMP: was 32, now 64
+    'resnet': 48,       # H100 + AMP: was 24, now 48
+    'swin': 32,         # H100 + AMP: was 16, now 32
+    'vit': 16,          # H100 + AMP: was 8, now 16
 }
 
 EPOCHS_2D = 100  # Shorter for comparison experiments
@@ -59,12 +61,14 @@ ITERATIONS_PER_EPOCH_2D = 1000
 INPUT_SHAPE_3D = (32, 256, 256)  # 32 slices
 INPUT_SCALE_3D = (8, 8, 8)
 
-# Smaller batch sizes for 3D due to memory
+# Batch sizes for 3D optimized for H100 80GB with AMP (BFloat16)
+# 3D models are significantly more memory-intensive
+# Conservative increases to ensure stability
 BATCH_SIZE_3D = {
-    'unet': 4,
-    'resnet': 4,
-    'vit': 1,
-    'swin': 1,          # 3D Swin uses significant memory
+    'unet': 8,          # H100 + AMP: was 4, now 8
+    'resnet': 8,        # H100 + AMP: was 4, now 8
+    'vit': 2,           # H100 + AMP: was 1, now 2
+    'swin': 2,          # H100 + AMP: was 1, now 2 (3D Swin is very memory-heavy)
 }
 
 EPOCHS_3D = 50  # Fewer epochs for 3D (slower iterations)

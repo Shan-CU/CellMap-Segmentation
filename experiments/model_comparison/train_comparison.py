@@ -53,6 +53,23 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
+# ============================================================
+# H100/CUDA Optimizations - Applied globally before any model creation
+# ============================================================
+# These settings maximize performance on H100 GPUs with minimal accuracy impact
+
+# cuDNN auto-tuner: finds fastest convolution algorithms for fixed input sizes
+# Critical for training where input shapes are constant
+torch.backends.cudnn.benchmark = True
+
+# TF32 (TensorFloat-32): Uses 19-bit precision for internal compute
+# Provides ~3x speedup with negligible accuracy loss on Ampere/Hopper GPUs
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+# Disable deterministic mode for maximum speed (set by benchmark=True implicitly)
+# torch.backends.cudnn.deterministic = False
+
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -175,6 +192,28 @@ def parse_args():
         '--pin_memory',
         action='store_true',
         help='Use pinned memory for faster GPU transfer (may increase memory usage)'
+    )
+    parser.add_argument(
+        '--amp',
+        action='store_true',
+        default=True,
+        help='Enable Automatic Mixed Precision (AMP) with BFloat16 for H100 (default: True)'
+    )
+    parser.add_argument(
+        '--no_amp',
+        action='store_true',
+        help='Disable AMP (use full precision)'
+    )
+    parser.add_argument(
+        '--compile',
+        action='store_true',
+        default=True,
+        help='Enable torch.compile() for PyTorch 2.x optimization (default: True)'
+    )
+    parser.add_argument(
+        '--no_compile',
+        action='store_true',
+        help='Disable torch.compile()'
     )
     
     return parser.parse_args()
@@ -508,6 +547,13 @@ def train_model(args) -> dict:
         print(f"Iterations/epoch: {iterations_per_epoch}")
         print(f"Device: {device}")
         print(f"World size: {world_size}")
+        # Show H100 optimizations status
+        use_amp = args.amp and not args.no_amp
+        use_compile = args.compile and not args.no_compile
+        print(f"AMP (BFloat16): {'Enabled' if use_amp else 'Disabled'}")
+        print(f"torch.compile(): {'Enabled' if use_compile else 'Disabled'}")
+        print(f"cuDNN benchmark: {torch.backends.cudnn.benchmark}")
+        print(f"TF32 matmul: {torch.backends.cuda.matmul.allow_tf32}")
         print(f"{'='*60}\n")
     
     # ============================================================
@@ -523,7 +569,25 @@ def train_model(args) -> dict:
     if is_main_process():
         print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
     
-    # DDP wrapper
+    # ============================================================
+    # torch.compile() Optimization (PyTorch 2.x)
+    # ============================================================
+    # Compiles the model using TorchDynamo for significant speedups
+    # Mode options: "default", "reduce-overhead" (faster), "max-autotune" (slower compile, faster run)
+    use_compile = args.compile and not args.no_compile
+    if use_compile and hasattr(torch, 'compile'):
+        if is_main_process():
+            print("Compiling model with torch.compile(mode='reduce-overhead')...")
+        try:
+            model = torch.compile(model, mode="reduce-overhead")
+            if is_main_process():
+                print("  Model compiled successfully")
+        except Exception as e:
+            if is_main_process():
+                print(f"  Warning: torch.compile() failed: {e}")
+                print("  Continuing without compilation...")
+    
+    # DDP wrapper (after compile for best performance)
     if use_ddp:
         from torch.nn.parallel import DistributedDataParallel as DDP
         model = DDP(
@@ -586,6 +650,19 @@ def train_model(args) -> dict:
     ])
     target_transforms = T.Compose([T.ToDtype(torch.float), Binarize()])
     
+    # DataLoader optimization kwargs for high-throughput training
+    # These are passed through **kwargs to CellMapDataLoader
+    dataloader_kwargs = {
+        'num_workers': args.num_workers,
+        'pin_memory': args.pin_memory,
+    }
+    
+    # Add prefetch_factor and persistent_workers if using multiple workers
+    # These significantly improve I/O pipeline efficiency
+    if args.num_workers > 0:
+        dataloader_kwargs['prefetch_factor'] = 4  # Prefetch 4 batches per worker
+        dataloader_kwargs['persistent_workers'] = True  # Don't respawn workers each epoch
+    
     train_loader, val_loader = get_dataloader(
         datasplit_path=datasplit_path,
         classes=CLASSES,
@@ -600,8 +677,7 @@ def train_model(args) -> dict:
         train_raw_value_transforms=train_raw_transforms,
         val_raw_value_transforms=train_raw_transforms,
         target_value_transforms=target_transforms,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_memory,
+        **dataloader_kwargs,
     )
     
     # Get fixed samples for visualization
@@ -700,6 +776,33 @@ def train_model(args) -> dict:
         writer = SummaryWriter(log_path)
     
     # ============================================================
+    # Automatic Mixed Precision (AMP) Setup
+    # ============================================================
+    # BFloat16 is preferred on H100 (better dynamic range than FP16)
+    # GradScaler handles loss scaling to prevent gradient underflow
+    use_amp = args.amp and not args.no_amp and torch.cuda.is_available()
+    
+    # Determine dtype: bfloat16 for H100/Ampere+, float16 for older GPUs
+    if use_amp:
+        # Check if bfloat16 is supported (Ampere+ GPUs)
+        if torch.cuda.is_bf16_supported():
+            amp_dtype = torch.bfloat16
+            # BFloat16 doesn't need gradient scaling (better dynamic range)
+            scaler = None
+            if is_main_process():
+                print("AMP enabled with BFloat16 (no scaler needed)")
+        else:
+            amp_dtype = torch.float16
+            scaler = torch.amp.GradScaler('cuda')
+            if is_main_process():
+                print("AMP enabled with Float16 + GradScaler")
+    else:
+        amp_dtype = torch.float32
+        scaler = None
+        if is_main_process():
+            print("AMP disabled - using full precision (Float32)")
+    
+    # ============================================================
     # Training Loop
     # ============================================================
     
@@ -742,23 +845,36 @@ def train_model(args) -> dict:
             else:
                 targets = batch[target_keys[0]].to(device)
             
-            # Forward pass
-            outputs = model(inputs)
+            # Forward pass with AMP autocast
+            # autocast automatically casts operations to lower precision where safe
+            with torch.amp.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
+                outputs = model(inputs)
+                # Compute loss (inside autocast for proper precision handling)
+                loss = criterion(outputs, targets) / GRADIENT_ACCUMULATION_STEPS
             
-            # Compute loss
-            loss = criterion(outputs, targets) / GRADIENT_ACCUMULATION_STEPS
-            
-            # Backward pass
-            loss.backward()
+            # Backward pass with optional gradient scaling (for FP16)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             # Gradient clipping (capture grad norm)
+            # Must unscale before clipping if using scaler
             grad_norm = None
-            if MAX_GRAD_NORM is not None:
-                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+            if (iter_idx + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                
+                if MAX_GRAD_NORM is not None:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
 
             # Optimizer step (apply gradient accumulation)
             if (iter_idx + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
-                optimizer.step()
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 # Step scheduler per optimizer step so OneCycleLR updates per effective batch
                 try:
                     scheduler.step()
