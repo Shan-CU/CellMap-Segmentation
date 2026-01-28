@@ -29,10 +29,10 @@ DIM="2d"
 # Transformers need smaller batches due to attention memory requirements
 # DDP overhead: ~25% extra memory for transformer gradients
 EPOCHS=200
-BATCH_SIZE=16                    # Per-GPU batch (smaller for transformer + DDP)
-ITERATIONS_PER_EPOCH=500         # Shared across all 2D models
+BATCH_SIZE=32                    # Per-GPU batch (smaller for transformer + DDP)
+ITERATIONS_PER_EPOCH=1000         # Shared across all 2D models
 LEARNING_RATE=5e-5               # Transformers benefit from lower LR
-GRADIENT_ACCUMULATION=8          # Effective batch = 16*8*2GPUs = 256
+GRADIENT_ACCUMULATION=8          # Effective batch = 32*8*2GPUs = 512
 NUM_WORKERS=8                    # DataLoader workers per GPU
 
 echo "=============================================="

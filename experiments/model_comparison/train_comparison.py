@@ -100,6 +100,18 @@ def parse_args():
         help='Number of training epochs (default: from config)'
     )
     parser.add_argument(
+        '--classes_file',
+        type=str,
+        default=None,
+        help='Path to JSON file with CLASSES override, e.g. {"CLASSES": ["nuc","mito"]}'
+    )
+    parser.add_argument(
+        '--iterations_per_epoch',
+        type=int,
+        default=None,
+        help='Override iterations per epoch (default: from config)'
+    )
+    parser.add_argument(
         '--batch_size', 
         type=int, 
         default=None,
@@ -137,6 +149,12 @@ def parse_args():
         type=int, 
         default=10,
         help='Save visualizations every N epochs'
+    )
+    parser.add_argument(
+        '--checkpoint_every',
+        type=int,
+        default=10,
+        help='Save periodic checkpoint every N epochs (default: 10)'
     )
     
     return parser.parse_args()
@@ -360,6 +378,9 @@ def create_comparison_figure(
         input_img = input_2d[0].cpu().numpy()
     else:
         input_img = input_2d.cpu().numpy()
+    # Ensure float32 to reduce host memory usage and avoid float64 upcasts
+    if input_img.dtype != np.float32:
+        input_img = input_img.astype(np.float32, copy=False)
     
     for col in range(3):
         axes[0, col].imshow(input_img, cmap='gray')
@@ -380,6 +401,8 @@ def create_comparison_figure(
         # Ground truth
         gt = target_2d[i].cpu().numpy()
         gt = np.nan_to_num(gt, nan=0)
+        if gt.dtype != np.float32:
+            gt = gt.astype(np.float32, copy=False)
         
         # Check if this class has any annotations in GT
         has_annotation = gt.sum() > 0
@@ -393,6 +416,8 @@ def create_comparison_figure(
         
         # Prediction
         pred = pred_2d[i].cpu().numpy()
+        if pred.dtype != np.float32:
+            pred = pred.astype(np.float32, copy=False)
         axes[row, 2].imshow(pred, cmap='hot', vmin=0, vmax=1)
         
         # Show prediction confidence stats
@@ -810,8 +835,11 @@ def train_model(args) -> dict:
                 torch.save(_model.state_dict(), save_path)
                 print(f"  -> New best model saved (dice={val_dice:.4f})")
             
-            # Save periodic checkpoint
-            if epoch % 10 == 0:
+            # Save periodic checkpoint (configurable via --checkpoint_every)
+            checkpoint_every = getattr(args, 'checkpoint_every', 10)
+            if checkpoint_every is None:
+                checkpoint_every = 10
+            if epoch % int(checkpoint_every) == 0:
                 save_path = CHECKPOINTS_PATH / f"{model_full_name}_epoch{epoch:04d}.pth"
                 torch.save(_model.state_dict(), save_path)
             
@@ -860,6 +888,32 @@ def train_model(args) -> dict:
 def main():
     """Main entry point."""
     args = parse_args()
+
+    # If user provided a classes override file, load it and replace global CLASSES
+    if args.classes_file is not None:
+        try:
+            import json
+            p = Path(args.classes_file)
+            if p.exists():
+                with open(p, 'r') as f:
+                    data = json.load(f)
+                if 'CLASSES' in data and isinstance(data['CLASSES'], list):
+                    # override the global CLASSES imported from config_base
+                    globals()['CLASSES'] = data['CLASSES']
+                    print(f"Overrode CLASSES with {len(data['CLASSES'])} entries from {p}")
+                else:
+                    print(f"Warning: {p} does not contain a 'CLASSES' list. Ignoring.")
+            else:
+                print(f"Warning: classes_file {p} not found. Ignoring.")
+        except Exception as e:
+            print(f"Warning: could not load classes_file: {e}")
+
+    # Allow override of iterations_per_epoch from CLI
+    if args.iterations_per_epoch is not None:
+        if args.dim == '2d':
+            globals()['ITERATIONS_PER_EPOCH_2D'] = args.iterations_per_epoch
+        else:
+            globals()['ITERATIONS_PER_EPOCH_3D'] = args.iterations_per_epoch
     
     # Validate model/dimension combination
     # All architectures now support both 2D and 3D

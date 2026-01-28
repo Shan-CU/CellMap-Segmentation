@@ -30,7 +30,7 @@ DIM="2d"
 # DDP overhead: ~20% extra memory for gradient synchronization
 EPOCHS=200
 BATCH_SIZE=32                    # Per-GPU batch (conservative for DDP)
-ITERATIONS_PER_EPOCH=500         # Shared across all 2D models
+ITERATIONS_PER_EPOCH=1000         # Shared across all 2D models
 LEARNING_RATE=1e-4
 GRADIENT_ACCUMULATION=4          # Effective batch = 32*4*2GPUs = 256
 NUM_WORKERS=8                    # DataLoader workers per GPU

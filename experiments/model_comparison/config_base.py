@@ -50,7 +50,7 @@ BATCH_SIZE_2D = {
 }
 
 EPOCHS_2D = 100  # Shorter for comparison experiments
-ITERATIONS_PER_EPOCH_2D = 100
+ITERATIONS_PER_EPOCH_2D = 1000
 
 # ============================================================
 # 3D EXPERIMENT SETTINGS
@@ -68,7 +68,7 @@ BATCH_SIZE_3D = {
 }
 
 EPOCHS_3D = 50  # Fewer epochs for 3D (slower iterations)
-ITERATIONS_PER_EPOCH_3D = 50
+ITERATIONS_PER_EPOCH_3D = 500
 
 # ============================================================
 # TRAINING HYPERPARAMETERS

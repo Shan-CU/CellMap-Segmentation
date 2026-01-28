@@ -29,10 +29,10 @@ DIM="2d"
 # ViT has global attention - most memory intensive transformer
 # DDP overhead: ~30% extra memory for large attention gradients
 EPOCHS=200
-BATCH_SIZE=12                    # Per-GPU batch (conservative for DDP)
-ITERATIONS_PER_EPOCH=500         # Shared across all 2D models
+BATCH_SIZE=32                    # Per-GPU batch (conservative for DDP)
+ITERATIONS_PER_EPOCH=1000         # Shared across all 2D models
 LEARNING_RATE=5e-5               # Transformers benefit from lower LR
-GRADIENT_ACCUMULATION=12         # Effective batch = 12*12*2GPUs = 288
+GRADIENT_ACCUMULATION=12         # Effective batch = 32*12*2GPUs = 768
 NUM_WORKERS=8                    # DataLoader workers per GPU
 
 echo "=============================================="

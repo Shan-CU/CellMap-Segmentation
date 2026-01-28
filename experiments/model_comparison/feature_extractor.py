@@ -336,7 +336,10 @@ def visualize_feature_maps(
         for col in range(max_channels):
             ax = axes[row, col]
             if col < n_channels:
-                ax.imshow(feat[col].cpu().numpy(), cmap='viridis')
+                arr = feat[col].cpu().numpy()
+                if arr.dtype != np.float32:
+                    arr = arr.astype(np.float32, copy=False)
+                ax.imshow(arr, cmap='viridis')
                 if col == 0:
                     ax.set_ylabel(name, fontsize=8)
             ax.set_xticks([])
@@ -391,7 +394,10 @@ def extract_and_save_features(
         features = extractor(x)
         
         for name, feat in features.items():
-            all_features[name].append(feat.cpu().numpy())
+            arr = feat.cpu().numpy()
+            if arr.dtype != np.float32:
+                arr = arr.astype(np.float32, copy=False)
+            all_features[name].append(arr)
         
         samples_collected += x.shape[0]
         if samples_collected >= num_samples:
@@ -401,7 +407,10 @@ def extract_and_save_features(
     save_dict = {}
     for name, feat_list in all_features.items():
         if feat_list:
-            save_dict[name] = np.concatenate(feat_list, axis=0)[:num_samples]
+            concatenated = np.concatenate(feat_list, axis=0)[:num_samples]
+            if concatenated.dtype != np.float32:
+                concatenated = concatenated.astype(np.float32, copy=False)
+            save_dict[name] = concatenated
     
     np.savez_compressed(save_path, **save_dict)
     print(f"Saved features to {save_path}")
