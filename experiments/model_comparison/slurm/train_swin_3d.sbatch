@@ -137,6 +137,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --epochs $EPOCHS \
     --batch_size $BATCH_SIZE \
     --lr $LEARNING_RATE \
+    --num_workers 0 \
     --save_features \
     --vis_every 5
 

@@ -96,6 +96,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model unet --dim 2d --epochs $EPOCHS_2D \
     --batch_size 48 --iterations_per_epoch $ITERS_2D \
+    --num_workers 4 \
     --save_features --vis_every 10
 UNET2D_EXIT=$?
 echo "UNet 2D finished with exit code: $UNET2D_EXIT"
@@ -107,6 +108,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model resnet --dim 2d --epochs $EPOCHS_2D \
     --batch_size 48 --iterations_per_epoch $ITERS_2D \
+    --num_workers 4 \
     --save_features --vis_every 10
 RESNET2D_EXIT=$?
 echo "ResNet 2D finished with exit code: $RESNET2D_EXIT"
@@ -118,6 +120,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model swin --dim 2d --epochs $EPOCHS_2D \
     --batch_size 40 --lr 5e-5 --iterations_per_epoch $ITERS_2D \
+    --num_workers 4 \
     --save_features --vis_every 10
 SWIN2D_EXIT=$?
 echo "Swin 2D finished with exit code: $SWIN2D_EXIT"
@@ -129,6 +132,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model vit --dim 2d --epochs $EPOCHS_2D \
     --batch_size 40 --lr 5e-5 --iterations_per_epoch $ITERS_2D \
+    --num_workers 4 \
     --save_features --vis_every 10
 VIT2D_EXIT=$?
 echo "ViT 2D finished with exit code: $VIT2D_EXIT"
@@ -148,6 +152,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model unet --dim 3d --epochs $EPOCHS_3D \
     --batch_size 8 --iterations_per_epoch $ITERS_3D \
+    --num_workers 2 \
     --save_features --vis_every 5
 UNET3D_EXIT=$?
 echo "UNet 3D finished with exit code: $UNET3D_EXIT"
@@ -159,6 +164,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model resnet --dim 3d --epochs $EPOCHS_3D \
     --batch_size 6 --iterations_per_epoch $ITERS_3D \
+    --num_workers 2 \
     --save_features --vis_every 5
 RESNET3D_EXIT=$?
 echo "ResNet 3D finished with exit code: $RESNET3D_EXIT"
@@ -171,6 +177,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model swin --dim 3d --epochs $EPOCHS_3D \
     --batch_size 3 --lr 3e-5 --iterations_per_epoch $ITERS_3D \
+    --num_workers 2 \
     --save_features --vis_every 5
 SWIN3D_EXIT=$?
 echo "Swin 3D finished with exit code: $SWIN3D_EXIT"
@@ -183,6 +190,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model vit --dim 3d --epochs $EPOCHS_3D \
     --batch_size 2 --lr 3e-5 --iterations_per_epoch $ITERS_3D \
+    --num_workers 2 \
     --save_features --vis_every 5
 VIT3D_EXIT=$?
 echo "ViT 3D finished with exit code: $VIT3D_EXIT"

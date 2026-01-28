@@ -156,6 +156,17 @@ def parse_args():
         default=10,
         help='Save periodic checkpoint every N epochs (default: 10)'
     )
+    parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=0,
+        help='Number of DataLoader workers (default: 0 for single-process loading, recommended for 3D)'
+    )
+    parser.add_argument(
+        '--pin_memory',
+        action='store_true',
+        help='Use pinned memory for faster GPU transfer (may increase memory usage)'
+    )
     
     return parser.parse_args()
 
@@ -580,6 +591,8 @@ def train_model(args) -> dict:
         train_raw_value_transforms=train_raw_transforms,
         val_raw_value_transforms=train_raw_transforms,
         target_value_transforms=target_transforms,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
     )
     
     # Get fixed samples for visualization
