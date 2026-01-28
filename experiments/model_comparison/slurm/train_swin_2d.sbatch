@@ -97,7 +97,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # Environment settings for optimal A100 performance with transformers
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:False,max_split_size_mb:256"
 export CUDA_LAUNCH_BLOCKING=0
 export NCCL_DEBUG=WARN
 export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
