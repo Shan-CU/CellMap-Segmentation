@@ -728,30 +728,41 @@ def train_model(args) -> dict:
             
             # Backward pass
             loss.backward()
-            
-            # Gradient clipping
+
+            # Gradient clipping (capture grad norm)
+            grad_norm = None
             if MAX_GRAD_NORM is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
-            
-            # Optimizer step
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+
+            # Optimizer step (apply gradient accumulation)
             if (iter_idx + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
                 optimizer.step()
+                # Step scheduler per optimizer step so OneCycleLR updates per effective batch
+                try:
+                    scheduler.step()
+                except Exception:
+                    pass
                 optimizer.zero_grad()
-            
+                # Log gradient norm and LR after the step
+                if writer is not None:
+                    if grad_norm is not None:
+                        writer.add_scalar('train/grad_norm', float(grad_norm), n_iter)
+                    try:
+                        current_lr = scheduler.get_last_lr()[0]
+                    except Exception:
+                        current_lr = args.lr
+                    writer.add_scalar('train/lr', current_lr, n_iter)
+
             # Log metrics
             loss_value = loss.item() * GRADIENT_ACCUMULATION_STEPS
             metrics_tracker.log_iteration(n_iter, loss_value, outputs, targets)
-            
+
             epoch_bar.set_postfix({'loss': f'{loss_value:.4f}'})
-            
+
             if writer is not None:
                 writer.add_scalar('train/loss', loss_value, n_iter)
         
-        # Scheduler step
-        scheduler.step()
-        
-        if writer is not None:
-            writer.add_scalar('train/lr', scheduler.get_last_lr()[0], n_iter)
+        # NOTE: Scheduler is stepped per optimizer step (handled inside loop)
         
         # ============================================================
         # Validation

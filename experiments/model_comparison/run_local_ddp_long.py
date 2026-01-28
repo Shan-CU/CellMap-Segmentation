@@ -39,7 +39,7 @@ DEFAULT_BATCH_SIZES = {
     'unet': 16,
     'resnet': 16,
     'swin': 16,
-    'vit': 16,   # memory-hungry; default to 1 to avoid OOM on smaller GPUs
+    'vit': 16,   # memory-hungry
 }
 
 # Map epochs -> sensible checkpoint frequency if user doesn't provide one
@@ -74,9 +74,6 @@ def build_cmd(model, classes_file: Path, epochs: int, iterations: int, batch_siz
         '--batch_size', str(batch_size),
         '--checkpoint_every', str(checkpoint_every),
     ]
-    # Pass classes override file to training script
-    if classes_file is not None:
-        cmd += ['--classes_file', str(classes_file)]
     if save_features:
         cmd.append('--save_features')
     return cmd
@@ -114,9 +111,6 @@ def main():
         'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True,max_split_size_mb:128',
         'PYTHONUNBUFFERED': '1',
     })
-    # Ensure the training script can import local package code
-    project_src = ROOT.parent.parent / 'src'
-    env['PYTHONPATH'] = str(project_src) + (':' + env.get('PYTHONPATH', ''))
 
     for model in args.models:
         bs = batch_sizes.get(model, 4)
