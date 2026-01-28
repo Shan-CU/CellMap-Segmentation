@@ -31,6 +31,15 @@ import sys
 import time
 from pathlib import Path
 
+# CRITICAL: Set multiprocessing start method to 'spawn' for CUDA compatibility
+# Must be done before any CUDA operations or torch imports that initialize CUDA
+# This fixes: "Cannot re-initialize CUDA in forked subprocess"
+if __name__ == "__main__":
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Already set
+
 import numpy as np
 import torch
 import torch.nn as nn
