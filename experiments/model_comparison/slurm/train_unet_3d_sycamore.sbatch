@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
 #SBATCH --gres=gpu:4
-#SBATCH --mem=1500G
+#SBATCH --mem=1200G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=logs/unet_3d_sycamore_%j.out
 #SBATCH --error=logs/unet_3d_sycamore_%j.err
@@ -116,7 +116,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 4 \
+    --num_workers 2 \
     --pin_memory \
     --amp \
     --compile \
