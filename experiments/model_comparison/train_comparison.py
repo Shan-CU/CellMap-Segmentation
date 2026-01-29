@@ -574,12 +574,14 @@ def train_model(args) -> dict:
     # ============================================================
     # Compiles the model using TorchDynamo for significant speedups
     # Mode options: "default", "reduce-overhead" (faster), "max-autotune" (slower compile, faster run)
+    # NOTE: "reduce-overhead" uses CUDA Graphs which conflicts with UNet skip connections
+    # Use "default" mode for compatibility with all architectures
     use_compile = args.compile and not args.no_compile
     if use_compile and hasattr(torch, 'compile'):
         if is_main_process():
-            print("Compiling model with torch.compile(mode='reduce-overhead')...")
+            print("Compiling model with torch.compile(mode='default')...")
         try:
-            model = torch.compile(model, mode="reduce-overhead")
+            model = torch.compile(model, mode="default")
             if is_main_process():
                 print("  Model compiled successfully")
         except Exception as e:
