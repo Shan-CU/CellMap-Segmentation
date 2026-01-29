@@ -611,7 +611,10 @@ def train_model(args) -> dict:
         betas=BETAS
     )
     
-    total_steps = epochs * iterations_per_epoch
+    # Calculate total optimizer steps accounting for gradient accumulation
+    # OneCycleLR.step() is called once per optimizer.step(), which happens
+    # every GRADIENT_ACCUMULATION_STEPS iterations
+    total_steps = (epochs * iterations_per_epoch) // GRADIENT_ACCUMULATION_STEPS
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=args.lr,
