@@ -350,7 +350,8 @@ def save_epoch_visualization(
     dimension: str,
     device: torch.device,
     save_path: Path,
-    feature_extractor: FeatureExtractor = None
+    feature_extractor: FeatureExtractor = None,
+    writer: SummaryWriter = None
 ) -> None:
     """
     Save visualization of model predictions and feature maps.
@@ -390,6 +391,11 @@ def save_epoch_visualization(
         # Save figure
         fig_path = save_path / f"{model_name}_{dimension}_epoch{epoch:04d}_sample{sample_idx}.png"
         fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+        
+        # Log to TensorBoard
+        if writer is not None:
+            writer.add_figure(f'samples/sample_{sample_idx}', fig, epoch)
+        
         plt.close(fig)
     
     # Save feature map visualization if available
@@ -398,6 +404,11 @@ def save_epoch_visualization(
             feat_fig = visualize_feature_maps(features, batch_idx=0, max_channels=8)
             feat_path = save_path / f"{model_name}_{dimension}_epoch{epoch:04d}_features.png"
             feat_fig.savefig(feat_path, dpi=150, bbox_inches='tight')
+            
+            # Log feature maps to TensorBoard
+            if writer is not None:
+                writer.add_figure('features/feature_maps', feat_fig, epoch)
+            
             plt.close(feat_fig)
         except Exception as e:
             print(f"Warning: Could not save feature maps: {e}")
@@ -1001,7 +1012,8 @@ def train_model(args) -> dict:
             if epoch % args.vis_every == 0 or epoch == 1:
                 save_epoch_visualization(
                     model, fixed_samples, epoch, model_full_name,
-                    args.dim, device, VISUALIZATIONS_PATH, feature_extractor
+                    args.dim, device, VISUALIZATIONS_PATH, feature_extractor,
+                    writer=writer
                 )
         
         # Clear cache
