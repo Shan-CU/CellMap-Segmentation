@@ -27,7 +27,7 @@ DIM="2d"
 
 # Optimized hyperparameters for 2D ResNet on 2x H100 80GB with DDP
 EPOCHS=200
-BATCH_SIZE=48                    # Increased from 32 (H100 advantage)
+BATCH_SIZE=48                    # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=1000        # Shared across all 2D models
 LEARNING_RATE=1e-4
 GRADIENT_ACCUMULATION=4          # Effective batch = 48*4*2GPUs = 384

@@ -29,10 +29,10 @@ DIM="2d"
 # H100 is ~1.5x faster than A100, so we can increase batch size
 # Using 2 GPUs (2D is I/O-bound, more GPUs = diminishing returns)
 EPOCHS=200
-BATCH_SIZE=48                    # Increased from 32 (H100 faster + more memory bandwidth)
+BATCH_SIZE=64                    # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=1000        # Shared across all 2D models for fair comparison
 LEARNING_RATE=1e-4
-GRADIENT_ACCUMULATION=2          # Effective batch = 48*2*2GPUs = 192
+GRADIENT_ACCUMULATION=2          # Effective batch = 64*2*2GPUs = 256
 NUM_WORKERS=12                   # 48 CPUs / 4 = 12 workers per GPU (with headroom)
 
 echo "=============================================="

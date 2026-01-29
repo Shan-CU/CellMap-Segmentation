@@ -29,7 +29,7 @@ DIM="3d"
 # Optimized hyperparameters for 3D UNet on 4x H100 80GB with DDP
 # With 4 GPUs we can increase batch size significantly
 EPOCHS=150
-BATCH_SIZE=8                     # Increased from 6 (4 GPUs + H100 speed)
+BATCH_SIZE=8                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250 (more compute available)
 LEARNING_RATE=1e-4
 GRADIENT_ACCUMULATION=4          # Effective batch = 8*4*4GPUs = 128

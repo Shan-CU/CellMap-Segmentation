@@ -28,10 +28,10 @@ DIM="2d"
 # Optimized hyperparameters for 2D Swin on 2x H100 80GB with DDP
 # H100 has better transformer performance with bf16 support
 EPOCHS=200
-BATCH_SIZE=40                    # Increased from 32 (H100 faster memory bandwidth)
+BATCH_SIZE=32                    # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=1000        # Shared across all 2D models
 LEARNING_RATE=5e-5               # Lower LR for transformers
-GRADIENT_ACCUMULATION=6          # Effective batch = 40*6*2GPUs = 480
+GRADIENT_ACCUMULATION=8          # Effective batch = 32*8*2GPUs = 512
 NUM_WORKERS=12
 
 echo "=============================================="

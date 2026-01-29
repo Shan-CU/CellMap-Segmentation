@@ -28,10 +28,10 @@ DIM="2d"
 # Optimized hyperparameters for 2D ViT on 2x H100 80GB with DDP
 # ViT has global attention - most memory intensive 2D transformer
 EPOCHS=200
-BATCH_SIZE=40                    # Increased from 32 (H100 memory bandwidth)
+BATCH_SIZE=16                    # H100 + AMP optimized (matches config_base.py - ViT has global attention)
 ITERATIONS_PER_EPOCH=1000        # Shared across all 2D models
 LEARNING_RATE=5e-5               # Lower LR for transformers
-GRADIENT_ACCUMULATION=8          # Effective batch = 40*8*2GPUs = 640
+GRADIENT_ACCUMULATION=16         # Effective batch = 16*16*2GPUs = 512
 NUM_WORKERS=12
 
 echo "=============================================="

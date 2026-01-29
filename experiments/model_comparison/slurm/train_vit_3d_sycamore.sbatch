@@ -30,7 +30,7 @@ DIM="3d"
 # ViT 3D has global attention - most memory intensive model
 # With 4 GPUs we can increase batch size from 1 to 2
 EPOCHS=150
-BATCH_SIZE=2                     # Increased from 1 (4 GPUs + H100 memory)
+BATCH_SIZE=2                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250
 LEARNING_RATE=3e-5               # Lower LR for stable 3D transformer training
 GRADIENT_ACCUMULATION=16         # Effective batch = 2*16*4GPUs = 128

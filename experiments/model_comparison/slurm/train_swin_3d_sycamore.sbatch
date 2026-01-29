@@ -30,10 +30,10 @@ DIM="3d"
 # 3D Swin has windowed attention but still very memory intensive
 # With 4 GPUs we can double the batch size compared to Blanca
 EPOCHS=150
-BATCH_SIZE=3                     # Increased from 2 (4 GPUs distributes memory)
+BATCH_SIZE=2                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250
 LEARNING_RATE=3e-5               # Lower LR for stable 3D transformer training
-GRADIENT_ACCUMULATION=10         # Effective batch = 3*10*4GPUs = 120
+GRADIENT_ACCUMULATION=16         # Effective batch = 2*16*4GPUs = 128
 NUM_WORKERS=8
 
 echo "=============================================="

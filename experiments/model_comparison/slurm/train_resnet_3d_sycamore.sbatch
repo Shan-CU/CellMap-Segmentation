@@ -28,10 +28,10 @@ DIM="3d"
 
 # Optimized hyperparameters for 3D ResNet on 4x H100 80GB with DDP
 EPOCHS=150
-BATCH_SIZE=6                     # Increased from 4 (4 GPUs + H100)
+BATCH_SIZE=8                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250
 LEARNING_RATE=1e-4
-GRADIENT_ACCUMULATION=6          # Effective batch = 6*6*4GPUs = 144
+GRADIENT_ACCUMULATION=4          # Effective batch = 8*4*4GPUs = 128
 NUM_WORKERS=8
 
 echo "=============================================="
