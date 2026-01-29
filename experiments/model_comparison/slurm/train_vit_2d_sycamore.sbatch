@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64
 #SBATCH --gres=gpu:2
-#SBATCH --mem=512G
+#SBATCH --mem=768G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=logs/vit_2d_sycamore_%j.out
 #SBATCH --error=logs/vit_2d_sycamore_%j.err
