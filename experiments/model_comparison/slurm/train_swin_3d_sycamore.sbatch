@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
 #SBATCH --gres=gpu:4
-#SBATCH --mem=1024G
+#SBATCH --mem=1500G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=logs/swin_3d_sycamore_%j.out
 #SBATCH --error=logs/swin_3d_sycamore_%j.err
