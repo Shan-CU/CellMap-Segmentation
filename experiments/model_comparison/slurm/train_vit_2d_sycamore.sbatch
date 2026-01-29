@@ -10,7 +10,7 @@
 #SBATCH --output=logs/vit_2d_sycamore_%j.out
 #SBATCH --error=logs/vit_2d_sycamore_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=gsgeorge@unc.edu
+#SBATCH --mail-user=gsgeorge@ad.unc.edu
 
 # ============================================================
 # ViT 2D Training - Optimized for UNC Sycamore (H100 80GB)

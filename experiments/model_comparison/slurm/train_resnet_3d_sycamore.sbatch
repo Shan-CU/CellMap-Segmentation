@@ -10,7 +10,7 @@
 #SBATCH --output=logs/resnet_3d_sycamore_%j.out
 #SBATCH --error=logs/resnet_3d_sycamore_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=gsgeorge@unc.edu
+#SBATCH --mail-user=gsgeorge@ad.unc.edu
 
 # ============================================================
 # ResNet 3D Training - Optimized for UNC Sycamore (H100 80GB)
