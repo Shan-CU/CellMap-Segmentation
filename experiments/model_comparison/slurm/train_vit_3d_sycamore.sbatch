@@ -123,7 +123,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 4 \
+    --num_workers 2 \
     --pin_memory \
     --amp \
     --compile \
