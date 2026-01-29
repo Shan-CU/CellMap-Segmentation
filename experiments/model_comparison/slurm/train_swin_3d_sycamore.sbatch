@@ -29,7 +29,7 @@ DIM="3d"
 # Optimized hyperparameters for 3D Swin on 4x H100 80GB with DDP
 # 3D Swin has windowed attention but still very memory intensive
 # With 4 GPUs we can double the batch size compared to Blanca
-EPOCHS=150
+EPOCHS=50
 BATCH_SIZE=2                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250
 LEARNING_RATE=3e-5               # Lower LR for stable 3D transformer training
@@ -123,7 +123,6 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
     --num_workers 1 \
-    --pin_memory \
     --amp \
     --compile \
     --save_features \

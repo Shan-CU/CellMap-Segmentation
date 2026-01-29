@@ -27,11 +27,11 @@ MODEL="resnet"
 DIM="3d"
 
 # Optimized hyperparameters for 3D ResNet on 4x H100 80GB with DDP
-EPOCHS=150
-BATCH_SIZE=8                     # H100 + AMP optimized (matches config_base.py)
+EPOCHS=50
+BATCH_SIZE=4                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250
 LEARNING_RATE=1e-4
-GRADIENT_ACCUMULATION=4          # Effective batch = 8*4*4GPUs = 128
+GRADIENT_ACCUMULATION=8          # Effective batch = 8*4*4GPUs = 128
 NUM_WORKERS=8
 
 echo "=============================================="
@@ -116,7 +116,6 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
     --num_workers 1 \
-    --pin_memory \
     --amp \
     --compile \
     --save_features \
