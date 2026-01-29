@@ -466,10 +466,17 @@ def check_scale(dataset, scale):
     -------
     bool
         True if the dataset has the required scale, False otherwise.
+        Returns False if multiscales metadata is missing (incomplete data).
     """
-    scale_label = dataset.attrs["multiscales"][0]["datasets"][0][
-        "coordinateTransformations"
-    ][0]["scale"]
+    try:
+        scale_label = dataset.attrs["multiscales"][0]["datasets"][0][
+            "coordinateTransformations"
+        ][0]["scale"]
+    except (KeyError, IndexError, TypeError) as e:
+        # Handle missing or malformed multiscales metadata
+        # This can happen with incomplete data downloads or corrupted zarr files
+        print(f"Warning: Missing or invalid multiscales metadata: {e}")
+        return False
     return all([sc_label <= sc for sc_label, sc in zip(scale_label, scale)])
 
 
