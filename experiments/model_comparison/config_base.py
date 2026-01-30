@@ -45,7 +45,7 @@ INPUT_SCALE_2D = (8, 8, 8)
 # Batch sizes optimized for H100 80GB with AMP (BFloat16)
 # With mixed precision, memory usage is ~50% lower, allowing larger batches
 BATCH_SIZE_2D = {
-    'unet': 64,         # H100 + AMP: was 32, now 64
+    'unet': 32,         # H100 + AMP: reduced from 64 to 32 for stability with InstanceNorm
     'resnet': 48,       # H100 + AMP: was 24, now 48
     'swin': 32,         # H100 + AMP: was 16, now 32
     'vit': 16,          # H100 + AMP: was 8, now 16
@@ -78,8 +78,23 @@ ITERATIONS_PER_EPOCH_3D = 500
 # TRAINING HYPERPARAMETERS
 # ============================================================
 
-# Learning rate
+# Learning rate (default)
 LEARNING_RATE = 1e-4
+
+# Model-specific learning rates (override default)
+# UNet benefits from lower LR to prevent mode collapse with class imbalance
+LEARNING_RATE_OVERRIDE = {
+    'unet_2d': 5e-5,    # Lower LR for stability with InstanceNorm + Dropout
+    'unet_3d': 5e-5,
+}
+
+# Model-specific loss configurations
+# UNet benefits from combined BCE + Dice loss to prevent mode collapse
+USE_COMBINED_LOSS = {
+    'unet_2d': True,
+    'unet_3d': True,
+}
+DICE_LOSS_WEIGHT = 0.5  # Weight for Dice loss in combined loss: BCE + w*Dice
 
 # Optimizer settings
 WEIGHT_DECAY = 1e-4
@@ -93,8 +108,8 @@ GRADIENT_ACCUMULATION_STEPS = 4
 
 # Class weight cap - prevents gradient instability from extremely rare classes
 # Set to None to disable capping (use original weights)
-# Recommended: 50-100 for stable training, None for aggressive rare-class learning
-MAX_CLASS_WEIGHT = 50.0  # Set to None to disable
+# Recommended: 25-50 for stable training, None for aggressive rare-class learning
+MAX_CLASS_WEIGHT = 25.0  # Lowered from 50 to reduce gradient variance
 
 # ============================================================
 # DATA AUGMENTATION
@@ -149,6 +164,8 @@ UNET_2D_CONFIG = {
     'n_channels': 1,
     'n_classes': len(CLASSES),
     'trilinear': False,
+    'use_instancenorm': True,   # InstanceNorm for better small-batch stability
+    'dropout': 0.2,             # Regularization to prevent mode collapse
 }
 
 # UNet-3D config

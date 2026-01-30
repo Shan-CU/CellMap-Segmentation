@@ -94,7 +94,8 @@ from config_base import (
     ensure_dirs_exist, GRADIENT_ACCUMULATION_STEPS, MAX_GRAD_NORM,
     LEARNING_RATE, WEIGHT_DECAY, BETAS, ITERATIONS_PER_EPOCH_2D,
     ITERATIONS_PER_EPOCH_3D, INPUT_SCALE_2D, INPUT_SCALE_3D,
-    VALIDATION_PROB, EPOCHS_2D, EPOCHS_3D, MAX_CLASS_WEIGHT
+    VALIDATION_PROB, EPOCHS_2D, EPOCHS_3D, MAX_CLASS_WEIGHT,
+    LEARNING_RATE_OVERRIDE, USE_COMBINED_LOSS, DICE_LOSS_WEIGHT
 )
 from metrics_tracker import MetricsTracker, DiceLoss
 from feature_extractor import FeatureExtractor, visualize_feature_maps
@@ -768,10 +769,27 @@ def train_model(args) -> dict:
     if spatial_dims == 3:
         pos_weight = pos_weight[..., None]
     
-    criterion = CellMapLossWrapper(
+    # BCE Loss (always used)
+    bce_criterion = CellMapLossWrapper(
         torch.nn.BCEWithLogitsLoss,
         pos_weight=pos_weight
     )
+    
+    # Combined loss for UNet (BCE + Dice) to prevent mode collapse
+    use_combined_loss = USE_COMBINED_LOSS.get(model_full_name, False)
+    dice_criterion = DiceLoss() if use_combined_loss else None
+    
+    if use_combined_loss and is_main_process():
+        print(f"\nUsing combined loss: BCE + {DICE_LOSS_WEIGHT}×Dice")
+        print("  (Helps prevent mode collapse with class-imbalanced data)")
+    
+    def criterion(outputs, targets):
+        """Compute loss (BCE or BCE + Dice)."""
+        bce_loss = bce_criterion(outputs, targets)
+        if use_combined_loss:
+            dice_loss = dice_criterion(outputs, targets)
+            return bce_loss + DICE_LOSS_WEIGHT * dice_loss
+        return bce_loss
     
     # Metrics tracker
     metrics_tracker = MetricsTracker(
@@ -1092,6 +1110,12 @@ def main():
         print(f"Error: Model '{args.model}' not available for {args.dim}.")
         print(f"Valid {args.dim} models: {valid_combos[args.dim]}")
         sys.exit(1)
+    
+    # Apply model-specific learning rate override if user didn't explicitly set --lr
+    model_full_name = f"{args.model}_{args.dim}"
+    if args.lr == LEARNING_RATE and model_full_name in LEARNING_RATE_OVERRIDE:
+        args.lr = LEARNING_RATE_OVERRIDE[model_full_name]
+        print(f"Using model-specific learning rate for {model_full_name}: {args.lr}")
     
     try:
         result = train_model(args)

@@ -10,20 +10,46 @@ import torch.nn.functional as F
 
 
 class DoubleConv(nn.Module):
-    """(convolution => [BN] => ReLU) * 2"""
+    """(convolution => [Norm] => ReLU => [Dropout]) * 2
+    
+    Supports BatchNorm or InstanceNorm with optional Dropout for regularization.
+    InstanceNorm is recommended for segmentation tasks with small batch sizes
+    as it normalizes per-sample rather than per-batch.
+    """
 
-    def __init__(self, in_channels, out_channels, mid_channels=None):
+    def __init__(
+        self, 
+        in_channels: int, 
+        out_channels: int, 
+        mid_channels: int = None,
+        use_instancenorm: bool = False,
+        dropout: float = 0.0
+    ):
         super().__init__()
         if not mid_channels:
             mid_channels = out_channels
-        self.double_conv = nn.Sequential(
+        
+        # Choose normalization layer
+        norm_layer = nn.InstanceNorm2d if use_instancenorm else nn.BatchNorm2d
+        
+        # Build sequential with optional dropout
+        layers = [
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(mid_channels),
+            norm_layer(mid_channels),
             nn.ReLU(inplace=True),
+        ]
+        if dropout > 0:
+            layers.append(nn.Dropout2d(p=dropout))
+        
+        layers.extend([
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            norm_layer(out_channels),
             nn.ReLU(inplace=True),
-        )
+        ])
+        if dropout > 0:
+            layers.append(nn.Dropout2d(p=dropout))
+        
+        self.double_conv = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.double_conv(x)
@@ -32,10 +58,21 @@ class DoubleConv(nn.Module):
 class Down(nn.Module):
     """Downscaling with maxpool then double conv"""
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(
+        self, 
+        in_channels: int, 
+        out_channels: int,
+        use_instancenorm: bool = False,
+        dropout: float = 0.0
+    ):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2), DoubleConv(in_channels, out_channels)
+            nn.MaxPool2d(2), 
+            DoubleConv(
+                in_channels, out_channels,
+                use_instancenorm=use_instancenorm,
+                dropout=dropout
+            )
         )
 
     def forward(self, x):
@@ -45,18 +82,33 @@ class Down(nn.Module):
 class Up(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, bilinear=True):
+    def __init__(
+        self, 
+        in_channels: int, 
+        out_channels: int, 
+        bilinear: bool = True,
+        use_instancenorm: bool = False,
+        dropout: float = 0.0
+    ):
         super().__init__()
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+            self.conv = DoubleConv(
+                in_channels, out_channels, in_channels // 2,
+                use_instancenorm=use_instancenorm,
+                dropout=dropout
+            )
         else:
             self.up = nn.ConvTranspose2d(
                 in_channels, in_channels // 2, kernel_size=2, stride=2
             )
-            self.conv = DoubleConv(in_channels, out_channels)
+            self.conv = DoubleConv(
+                in_channels, out_channels,
+                use_instancenorm=use_instancenorm,
+                dropout=dropout
+            )
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
@@ -104,24 +156,42 @@ class UNet_2D(nn.Module):
         Number of output channels.
     trilinear : bool
         Whether to use trilinear interpolation or not.
+    use_instancenorm : bool
+        If True, use InstanceNorm instead of BatchNorm.
+        Recommended for segmentation with small batch sizes.
+    dropout : float
+        Dropout probability (0.0 = no dropout). Recommended: 0.1-0.2.
     """
 
-    def __init__(self, n_channels, n_classes, trilinear=False):
+    def __init__(
+        self, 
+        n_channels: int, 
+        n_classes: int, 
+        trilinear: bool = False,
+        use_instancenorm: bool = False,
+        dropout: float = 0.0
+    ):
         super(UNet_2D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.trilinear = trilinear
+        self.use_instancenorm = use_instancenorm
+        self.dropout = dropout
 
-        self.inc = DoubleConv(n_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
+        self.inc = DoubleConv(
+            n_channels, 64, 
+            use_instancenorm=use_instancenorm, 
+            dropout=dropout
+        )
+        self.down1 = Down(64, 128, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.down2 = Down(128, 256, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.down3 = Down(256, 512, use_instancenorm=use_instancenorm, dropout=dropout)
         factor = 2 if trilinear else 1
-        self.down4 = Down(512, 1024 // factor)
-        self.up1 = Up(1024, 512 // factor, trilinear)
-        self.up2 = Up(512, 256 // factor, trilinear)
-        self.up3 = Up(256, 128 // factor, trilinear)
-        self.up4 = Up(128, 64, trilinear)
+        self.down4 = Down(512, 1024 // factor, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.up1 = Up(1024, 512 // factor, trilinear, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.up2 = Up(512, 256 // factor, trilinear, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.up3 = Up(256, 128 // factor, trilinear, use_instancenorm=use_instancenorm, dropout=dropout)
+        self.up4 = Up(128, 64, trilinear, use_instancenorm=use_instancenorm, dropout=dropout)
         self.outc = OutConv(64, n_classes)
 
     def forward(self, x):
