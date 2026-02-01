@@ -29,11 +29,11 @@ DIM="2d"
 # H100 is ~1.5x faster than A100, so we can increase batch size
 # Using 2 GPUs (2D is I/O-bound, more GPUs = diminishing returns)
 EPOCHS=200
-BATCH_SIZE=64                    # H100 + AMP optimized (matches config_base.py)
+BATCH_SIZE=32                    # Reduced for InstanceNorm stability (was 64)
 ITERATIONS_PER_EPOCH=1000        # Shared across all 2D models for fair comparison
-LEARNING_RATE=1e-4
-GRADIENT_ACCUMULATION=2          # Effective batch = 64*2*2GPUs = 256
-NUM_WORKERS=12                   # 48 CPUs / 4 = 12 workers per GPU (with headroom)
+LEARNING_RATE=5e-5               # Lower LR to prevent mode collapse (was 1e-4)
+GRADIENT_ACCUMULATION=4          # Effective batch = 32*4*2GPUs = 256
+NUM_WORKERS=8                    # Reduced workers for stability
 
 echo "=============================================="
 echo "CellMap Model Comparison - UNet 2D"

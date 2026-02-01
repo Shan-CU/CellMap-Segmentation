@@ -95,9 +95,10 @@ from config_base import (
     LEARNING_RATE, WEIGHT_DECAY, BETAS, ITERATIONS_PER_EPOCH_2D,
     ITERATIONS_PER_EPOCH_3D, INPUT_SCALE_2D, INPUT_SCALE_3D,
     VALIDATION_PROB, EPOCHS_2D, EPOCHS_3D, MAX_CLASS_WEIGHT,
-    LEARNING_RATE_OVERRIDE, USE_COMBINED_LOSS, DICE_LOSS_WEIGHT
+    LEARNING_RATE_OVERRIDE, USE_COMBINED_LOSS, DICE_LOSS_WEIGHT,
+    USE_FOCAL_LOSS, FOCAL_GAMMA, FOCAL_ALPHA, USE_DICE_LOSS
 )
-from metrics_tracker import MetricsTracker, DiceLoss
+from metrics_tracker import MetricsTracker, DiceLoss, FocalLoss
 from feature_extractor import FeatureExtractor, visualize_feature_maps
 
 
@@ -769,27 +770,49 @@ def train_model(args) -> dict:
     if spatial_dims == 3:
         pos_weight = pos_weight[..., None]
     
-    # BCE Loss (always used)
-    bce_criterion = CellMapLossWrapper(
-        torch.nn.BCEWithLogitsLoss,
-        pos_weight=pos_weight
-    )
+    # ============================================================
+    # LOSS FUNCTION SETUP
+    # ============================================================
+    # Default: Focal Loss + Dice (optimal for extreme class imbalance)
+    # Focal Loss: FL(p_t) = -α_t * (1 - p_t)^γ * log(p_t)
+    #   - Down-weights easy examples, focuses on hard negatives
+    #   - gamma=2.0 is standard, higher = more focus on hard examples
+    # Dice Loss: Directly optimizes segmentation overlap
+    # ============================================================
     
-    # Combined loss for UNet (BCE + Dice) to prevent mode collapse
-    use_combined_loss = USE_COMBINED_LOSS.get(model_full_name, False)
-    dice_criterion = DiceLoss() if use_combined_loss else None
+    if USE_FOCAL_LOSS:
+        # Focal Loss with class weights (handles class imbalance better than BCE)
+        base_criterion = FocalLoss(
+            alpha=FOCAL_ALPHA, 
+            gamma=FOCAL_GAMMA,
+            pos_weight=pos_weight  # Apply per-class weights for rare classes
+        )
+        loss_name = f"Focal(γ={FOCAL_GAMMA})"
+    else:
+        # BCE Loss with class weights (legacy)
+        base_criterion = CellMapLossWrapper(
+            torch.nn.BCEWithLogitsLoss,
+            pos_weight=pos_weight
+        )
+        loss_name = "BCE"
     
-    if use_combined_loss and is_main_process():
-        print(f"\nUsing combined loss: BCE + {DICE_LOSS_WEIGHT}×Dice")
-        print("  (Helps prevent mode collapse with class-imbalanced data)")
+    # Dice Loss (always beneficial for segmentation)
+    dice_criterion = DiceLoss() if USE_DICE_LOSS else None
+    
+    if is_main_process():
+        if USE_DICE_LOSS:
+            print(f"\nLoss function: {loss_name} + {DICE_LOSS_WEIGHT}×Dice")
+        else:
+            print(f"\nLoss function: {loss_name}")
+        print("  (Focal Loss focuses on hard examples, Dice optimizes overlap)")
     
     def criterion(outputs, targets):
-        """Compute loss (BCE or BCE + Dice)."""
-        bce_loss = bce_criterion(outputs, targets)
-        if use_combined_loss:
+        """Compute loss (Focal/BCE + Dice)."""
+        base_loss = base_criterion(outputs, targets)
+        if USE_DICE_LOSS:
             dice_loss = dice_criterion(outputs, targets)
-            return bce_loss + DICE_LOSS_WEIGHT * dice_loss
-        return bce_loss
+            return base_loss + DICE_LOSS_WEIGHT * dice_loss
+        return base_loss
     
     # Metrics tracker
     metrics_tracker = MetricsTracker(

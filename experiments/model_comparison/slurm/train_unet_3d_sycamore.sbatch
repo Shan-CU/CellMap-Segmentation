@@ -31,9 +31,9 @@ DIM="3d"
 EPOCHS=50
 BATCH_SIZE=4                     # H100 + AMP optimized (matches config_base.py)
 ITERATIONS_PER_EPOCH=500         # Increased from 250 (more compute available)
-LEARNING_RATE=1e-4
+LEARNING_RATE=5e-5               # Lower LR to prevent mode collapse (was 1e-4)
 GRADIENT_ACCUMULATION=8          # Effective batch = 8*4*4GPUs = 128
-NUM_WORKERS=8                    # 64 CPUs / 8 = 8 workers per GPU
+NUM_WORKERS=0                    # CRITICAL: Disable multiprocessing to prevent OOM
 
 echo "=============================================="
 echo "CellMap Model Comparison - UNet 3D"
@@ -116,7 +116,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 1 \
+    --num_workers 0 \
     --amp \
     --compile \
     --save_features \

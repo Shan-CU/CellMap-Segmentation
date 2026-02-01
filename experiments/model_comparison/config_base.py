@@ -82,19 +82,37 @@ ITERATIONS_PER_EPOCH_3D = 500
 LEARNING_RATE = 1e-4
 
 # Model-specific learning rates (override default)
-# UNet benefits from lower LR to prevent mode collapse with class imbalance
+# Lower LR prevents mode collapse with class imbalance
 LEARNING_RATE_OVERRIDE = {
     'unet_2d': 5e-5,    # Lower LR for stability with InstanceNorm + Dropout
     'unet_3d': 5e-5,
+    'swin_2d': 5e-5,    # Transformers need lower LR to prevent attention collapse
+    'swin_3d': 5e-5,
+    'vit_2d': 5e-5,
+    'vit_3d': 5e-5,
 }
 
-# Model-specific loss configurations
-# UNet benefits from combined BCE + Dice loss to prevent mode collapse
+# ============================================================
+# LOSS FUNCTION SETTINGS
+# ============================================================
+# Focal Loss + Dice is optimal for extreme class imbalance (14 classes, 7-8 rare)
+# Focal Loss down-weights easy examples, focusing on hard negatives
+# Dice Loss directly optimizes segmentation overlap
+
+# Use Focal Loss instead of BCE (recommended for all models)
+USE_FOCAL_LOSS = True
+FOCAL_GAMMA = 2.0  # Focus parameter: higher = more focus on hard examples
+FOCAL_ALPHA = 0.25  # Balance parameter for positive class
+
+# Combine with Dice Loss (recommended for all models)
+USE_DICE_LOSS = True
+DICE_LOSS_WEIGHT = 0.5  # Weight for Dice loss in combined loss
+
+# Legacy: model-specific combined loss (deprecated, use global settings above)
 USE_COMBINED_LOSS = {
     'unet_2d': True,
     'unet_3d': True,
 }
-DICE_LOSS_WEIGHT = 0.5  # Weight for Dice loss in combined loss: BCE + w*Dice
 
 # Optimizer settings
 WEIGHT_DECAY = 1e-4
@@ -173,6 +191,8 @@ UNET_3D_CONFIG = {
     'n_channels': 1,
     'n_classes': len(CLASSES),
     'trilinear': False,
+    'use_instancenorm': True,   # InstanceNorm for better small-batch stability
+    'dropout': 0.2,             # Regularization to prevent mode collapse
 }
 
 # ResNet-2D config
@@ -201,6 +221,9 @@ SWIN_2D_CONFIG = {
     'num_heads': [3, 6, 12, 24],
     'window_size': [7, 7],
     'num_classes': len(CLASSES),
+    'drop_rate': 0.1,           # Dropout for regularization
+    'attn_drop_rate': 0.1,      # Attention dropout to prevent collapse
+    'drop_path_rate': 0.1,      # Stochastic depth for regularization
 }
 
 # Swin Transformer 3D config
@@ -211,6 +234,9 @@ SWIN_3D_CONFIG = {
     'num_heads': [3, 6, 12, 24],
     'window_size': [4, 7, 7],
     'num_classes': len(CLASSES),
+    'drop_rate': 0.1,           # Dropout for regularization
+    'attn_drop_rate': 0.1,      # Attention dropout to prevent collapse
+    'drop_path_rate': 0.1,      # Stochastic depth for regularization
 }
 
 # ViT-V-Net 3D config
@@ -230,7 +256,7 @@ VIT_2D_CONFIG = {
     'mlp_dim': 3072,
     'decoder_channels': (256, 128, 64, 16),
     'dropout_rate': 0.1,
-    'attention_dropout_rate': 0.0,
+    'attention_dropout_rate': 0.1,  # Attention dropout to prevent collapse
     'down_factor': 2,
 }
 

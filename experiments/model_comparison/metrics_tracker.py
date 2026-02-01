@@ -81,40 +81,92 @@ class FocalLoss(nn.Module):
     Focal Loss for handling class imbalance.
     
     FL(p_t) = -α_t * (1 - p_t)^γ * log(p_t)
+    
+    Features:
+    - Supports per-class weights (pos_weight) for multi-class segmentation
+    - Down-weights easy examples, focuses training on hard negatives
+    - Handles NaN values in targets (masked regions)
+    
+    Parameters
+    ----------
+    alpha : float or torch.Tensor
+        Balance factor. If tensor, should be shape (C,) for C classes.
+        Default 0.25 works well for most cases.
+    gamma : float
+        Focus parameter. Higher values = more focus on hard examples.
+        gamma=0 is equivalent to BCE. gamma=2.0 is standard.
+    pos_weight : torch.Tensor, optional
+        Per-class positive weights, shape (C, 1, 1) or (C, 1, 1, 1) for 3D.
+        If provided, applies class-specific weighting to positive examples.
+    reduction : str
+        'mean', 'sum', or 'none'
     """
     
     def __init__(
         self, 
         alpha: float = 0.25, 
         gamma: float = 2.0, 
+        pos_weight: Optional[torch.Tensor] = None,
         reduction: str = 'mean'
     ):
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.reduction = reduction
+        # Register pos_weight as buffer so it moves with model to GPU
+        if pos_weight is not None:
+            self.register_buffer('pos_weight', pos_weight)
+        else:
+            self.pos_weight = None
     
     def forward(
         self, 
         predictions: torch.Tensor, 
         targets: torch.Tensor
     ) -> torch.Tensor:
-        """Compute Focal Loss."""
+        """
+        Compute Focal Loss.
+        
+        Parameters
+        ----------
+        predictions : torch.Tensor
+            Model logits, shape (B, C, H, W) or (B, C, D, H, W)
+        targets : torch.Tensor
+            Ground truth, shape (B, C, H, W) or (B, C, D, H, W)
+            
+        Returns
+        -------
+        torch.Tensor
+            Focal loss value
+        """
         probs = torch.sigmoid(predictions)
         
-        # Handle NaN values
+        # Handle NaN values (masked regions)
         mask = ~torch.isnan(targets)
         targets = targets.nan_to_num(0)
         
-        # Focal loss computation
+        # Base cross-entropy loss
         ce_loss = F.binary_cross_entropy_with_logits(
             predictions, targets, reduction='none'
         )
         
+        # Focal weight: (1 - p_t)^gamma
+        # p_t = p if y=1, else (1-p)
         p_t = probs * targets + (1 - probs) * (1 - targets)
         focal_weight = (1 - p_t) ** self.gamma
         
-        loss = self.alpha * focal_weight * ce_loss * mask
+        # Apply alpha balance factor
+        loss = self.alpha * focal_weight * ce_loss
+        
+        # Apply per-class positive weights if provided
+        if self.pos_weight is not None:
+            # pos_weight should be broadcastable: (C, 1, 1) or (C, 1, 1, 1)
+            # Apply higher weight to positive examples of rare classes
+            weight = targets * self.pos_weight + (1 - targets)
+            loss = loss * weight
+        
+        # Apply mask for NaN regions
+        loss = loss * mask
         
         if self.reduction == 'mean':
             return loss.sum() / mask.sum().clamp(min=1)
