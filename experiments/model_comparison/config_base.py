@@ -102,7 +102,7 @@ LEARNING_RATE_OVERRIDE = {
 # Use Focal Loss instead of BCE (recommended for all models)
 USE_FOCAL_LOSS = True
 FOCAL_GAMMA = 2.0  # Focus parameter: higher = more focus on hard examples
-FOCAL_ALPHA = 0.25  # Balance parameter for positive class
+FOCAL_ALPHA = 1.0  # Set to 1.0 since pos_weight handles class balance
 
 # Combine with Dice Loss (recommended for all models)
 USE_DICE_LOSS = True
