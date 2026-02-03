@@ -6,19 +6,25 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:2
-#SBATCH --mem=192G
+#SBATCH --gres=gpu:rtx6000:2
+#SBATCH --mem=200G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=logs/swin_blanca_%j.out
 #SBATCH --error=logs/swin_blanca_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=george.stephenson@colorado.edu
 
-# === Blanca-ready Slurm script for SwinTransformer training ===
-# User-configurable variables (kept for convenience)
-PARTITION="blanca-biokem"   # using biokem (2x A100 per node)
-ACCOUNT="ucb-general"       # your Blanca account/project
-EMAIL="george.stephenson@colorado.edu"    # mail notifications
+# ============================================================
+# CellMap SwinTransformer 2D Training - BLANCA BIOKEM OPTIMIZED
+# Hardware: blanca-biokem RTX 6000 nodes
+# Resource Request: 2x RTX 6000 (24GB each), 32 CPUs, 200GB RAM
+# Walltime: 7 days (maximum for priority queue)
+# Optimizations:
+#   - 2 GPUs with DistributedDataParallel (DDP)
+#   - 32 CPU cores for parallel data loading (16 per GPU)
+#   - Full 7-day runtime for maximum training iterations
+#   - Mixed precision (AMP) for TensorCore acceleration
+# ============================================================
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -28,9 +34,9 @@ echo "Start time: $(date)"
 
 cd $SLURM_SUBMIT_DIR
 
-# --- Load modules or environment manager available on Blanca ---
+# --- Load Blanca-specific Slurm and modules ---
 module purge
-# Example: module load miniconda/23-11  # adjust to Blanca's module name
+module load slurm/blanca
 module load anaconda 2>/dev/null || true
 
 # If the module system doesn't expose Anaconda on this node, fall back to a user install.
@@ -55,34 +61,77 @@ conda activate /projects/$USER/software/anaconda/envs/cellmap || {
     conda activate cellmap || true
 }
 
+# Verify GPU access
 echo "Python: $(which python)"
-echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'n/a')"
-echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null || echo 'n/a')"
+echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
+echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+echo "GPU count: $(python -c 'import torch; print(torch.cuda.device_count())')"
+for i in $(seq 0 1); do
+    echo "GPU $i: $(python -c "import torch; print(torch.cuda.get_device_name($i) if torch.cuda.device_count() > $i else 'N/A')")"
+done
 
 mkdir -p logs tensorboard checkpoints
 
+# Set environment variables for optimal performance
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+# CRITICAL: garbage_collection_threshold=0.9 prevents memory fragmentation/leaks
+export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512,garbage_collection_threshold:0.9"
+export CUDA_LAUNCH_BLOCKING=0
+# Lazy module loading reduces initial memory overhead
+export CUDA_MODULE_LOADING=LAZY
+export NCCL_DEBUG=INFO
+# A100/RTX optimizations
+export NVIDIA_TF32_OVERRIDE=1
+export TORCH_CUDNN_V8_API_ENABLED=1
+# Use job-specific cache directory to avoid conflicts
+export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 
-# Optional: stage data to local scratch (uncomment & update paths if Blanca provides $SLURM_SCRATCH)
-# if [ -n "$SLURM_SCRATCH" ]; then
-#   rsync -a /scratch/$USER/cellmap_data $SLURM_SCRATCH/ && export CELLMAP_DATA_DIR=$SLURM_SCRATCH/cellmap_data
-# fi
+# Optional: stage data to local scratch for fastest I/O
+# Blanca nodes have local scratch at $SLURM_SCRATCH (~400GB)
+if [ -n "$SLURM_SCRATCH" ] && [ -d "/scratch/alpine/$USER/cellmap_data" ]; then
+    echo "Staging data to local scratch for faster I/O..."
+    rsync -a --info=progress2 "/scratch/alpine/$USER/cellmap_data" "$SLURM_SCRATCH/"
+    export CELLMAP_DATA_DIR="$SLURM_SCRATCH/cellmap_data"
+    echo "Data staged to: $CELLMAP_DATA_DIR"
+fi
 
+# ============================================================
 # Start TensorBoard in background
+# ============================================================
 TB_PORT=$((6006 + SLURM_JOB_ID % 1000))
 TB_LOGDIR="$SLURM_SUBMIT_DIR/tensorboard"
+
+echo "=========================================="
+echo "TENSORBOARD CONNECTION INFO"
+echo "=========================================="
+echo "TensorBoard starting on port: $TB_PORT"
+echo "Node: $SLURM_NODELIST"
+echo ""
+echo "To connect, run this SSH tunnel from your LOCAL machine:"
+echo "  ssh -L $TB_PORT:$SLURM_NODELIST:$TB_PORT gest9386@login.rc.colorado.edu"
+echo ""
+echo "Then open in browser: http://localhost:$TB_PORT"
+echo "=========================================="
+
 tensorboard --logdir=$TB_LOGDIR --port=$TB_PORT --bind_all &
 TB_PID=$!
+echo "TensorBoard PID: $TB_PID"
 
+# Run training with torchrun for DDP
+# torchrun handles process spawning and environment variable setup for DDP
 echo "Starting SwinTransformer training with DDP (torchrun)..."
 N_GPUS=$(nvidia-smi -L | wc -l)
 echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
 torchrun --standalone --nproc_per_node=$N_GPUS examples/train_swin_baseline.py
 TRAIN_EXIT_CODE=$?
 
+# Cleanup TensorBoard
 echo "Stopping TensorBoard..."
-kill $TB_PID 2>/dev/null || true
+kill $TB_PID 2>/dev/null
 
+echo "=========================================="
 echo "End time: $(date)"
+echo "Training exit code: $TRAIN_EXIT_CODE"
+echo "=========================================="
+
 exit $TRAIN_EXIT_CODE
