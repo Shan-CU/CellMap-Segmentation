@@ -203,8 +203,8 @@ def parse_args():
     parser.add_argument(
         '--prefetch_factor',
         type=int,
-        default=2,
-        help='Number of batches to prefetch per worker (default: 2, increase for monster jobs)'
+        default=8,
+        help='Number of batches to prefetch per worker (default: 8 for better GPU utilization)'
     )
     parser.add_argument(
         '--amp',
