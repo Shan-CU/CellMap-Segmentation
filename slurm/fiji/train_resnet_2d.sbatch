@@ -50,9 +50,8 @@ echo "Learning Rate: $LEARNING_RATE"
 echo "Effective Batch: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
 echo "=============================================="
 
-# Navigate to project root
-cd $SLURM_SUBMIT_DIR
-PROJECT_ROOT=$(pwd)
+PROJECT_ROOT=/scratch/Users/gest9386/CellMap-Segmentation
+cd $PROJECT_ROOT
 echo "Project root: $PROJECT_ROOT"
 
 # Create directories
