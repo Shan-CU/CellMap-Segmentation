@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:2
-#SBATCH --mem=400G
+#SBATCH --mem=150G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/unet3d_alpine_test_%j.out
 #SBATCH --error=logs/unet3d_alpine_test_%j.err
