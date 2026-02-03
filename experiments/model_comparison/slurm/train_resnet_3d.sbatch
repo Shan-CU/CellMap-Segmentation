@@ -67,7 +67,7 @@ mkdir -p experiments/model_comparison/metrics
 
 # Load Blanca-specific modules
 module purge
-# Example: module load miniconda/23-11  # adjust to Blanca's module name
+module load slurm/blanca
 module load anaconda 2>/dev/null || true
 
 # If the module system doesn't expose Anaconda on this node, fall back to a user install.
@@ -98,6 +98,19 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # Environment settings for optimal A100 performance with 3D models
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+# CRITICAL: garbage_collection_threshold=0.9 prevents memory fragmentation/leaks in 3D
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
+export CUDA_LAUNCH_BLOCKING=0
+export CUDA_MODULE_LOADING=LAZY
+export NCCL_DEBUG=WARN
+# A100 optimizations for 3D
+export NVIDIA_TF32_OVERRIDE=1
+export TORCH_CUDNN_V8_API_ENABLED=1
+export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
+# 3D-specific NCCL optimizations
+export NCCL_SOCKET_IFNAME=^docker0,lo
+export NCCL_IB_DISABLE=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:False,max_split_size_mb:256"
 export CUDA_LAUNCH_BLOCKING=0
 export NCCL_DEBUG=WARN
