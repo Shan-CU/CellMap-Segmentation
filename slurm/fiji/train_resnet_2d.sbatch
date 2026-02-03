@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:2
 #SBATCH --mem=320G
-#SBATCH --time=7-00:00:00
+#SBATCH --time=30-00:00:00
 #SBATCH --output=logs/resnet_2d_fiji_%j.out
 #SBATCH --error=logs/resnet_2d_fiji_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL

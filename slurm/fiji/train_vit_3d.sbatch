@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --gres=gpu:4
 #SBATCH --mem=400G
-#SBATCH --time=7-00:00:00
+#SBATCH --time=30-00:00:00
 #SBATCH --output=logs/vit_3d_fiji_%j.out
 #SBATCH --error=logs/vit_3d_fiji_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
