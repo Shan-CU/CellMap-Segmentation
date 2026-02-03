@@ -93,7 +93,7 @@ else
 fi
 
 # Job 6: UNet 3D
-echo -n "6. UNet 3D (3x RTX 6000, 48 CPUs, 250GB)... "
+echo -n "6. UNet 3D (2x A100, 32 CPUs, 400GB)... "
 UNET_3D_JOB=$(sbatch --parsable slurm/train_unet3d_blanca.sbatch)
 if [ $? -eq 0 ]; then
     echo "✓ Job ID: $UNET_3D_JOB"
@@ -137,16 +137,16 @@ echo "  ViT 2D:    $VIT_2D_JOB (2x A100)"
 echo ""
 echo "3D Models:"
 echo "  ResNet 3D: $RESNET_3D_JOB (2x A100)"
-echo "  UNet 3D:   $UNET_3D_JOB (3x RTX 6000)"
+echo "  UNet 3D:   $UNET_3D_JOB (2x A100)"
 echo "  Swin 3D:   $SWIN_3D_JOB (2x A100)"
 echo "  ViT 3D:    $VIT_3D_JOB (2x A100)"
 echo ""
 echo "Total Resources Requested:"
-echo "  - A100 GPUs: 10 (5 jobs × 2 GPUs)"
-echo "  - RTX 6000 GPUs: 7 (2 jobs × 2 + 1 job × 3)"
-echo "  - Total GPUs: 17 across 8 jobs"
-echo "  - Total CPUs: 280"
-echo "  - Total RAM: ~2.5TB"
+echo "  - A100 GPUs: 12 (6 jobs × 2 GPUs)"
+echo "  - RTX 6000 GPUs: 4 (2 jobs × 2 GPUs)"
+echo "  - Total GPUs: 16 across 8 jobs"
+echo "  - Total CPUs: 264"
+echo "  - Total RAM: ~2.7TB"
 echo "  - Walltime: 3-7 days per job"
 echo ""
 echo "=========================================="

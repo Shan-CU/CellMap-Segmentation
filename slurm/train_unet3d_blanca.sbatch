@@ -5,9 +5,9 @@
 #SBATCH --qos=blanca-biokem
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=48
-#SBATCH --gres=gpu:rtx6000:3
-#SBATCH --mem=250G
+#SBATCH --cpus-per-task=32
+#SBATCH --gres=gpu:a100:2
+#SBATCH --mem=400G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=logs/unet3d_blanca_%j.out
 #SBATCH --error=logs/unet3d_blanca_%j.err
@@ -15,13 +15,13 @@
 #SBATCH --mail-user=george.stephenson@colorado.edu
 
 # ============================================================
-# CellMap UNet3D Training - BLANCA BIOKEM OPTIMIZED (MAX POWER)
-# Hardware: blanca-biokem RTX 6000 node (bgpu-biokem3)
-# Resource Request: 3x RTX 6000 (72GB total), 48 CPUs, 250GB RAM
+# CellMap UNet3D Training - BLANCA BIOKEM OPTIMIZED
+# Hardware: blanca-biokem A100 node (bgpu-biokem2)
+# Resource Request: 2x A100 (160GB total), 32 CPUs, 400GB RAM
 # Walltime: 7 days (maximum for priority queue)
 # Optimizations:
-#   - 3 GPUs with DistributedDataParallel for 3D volumetric processing
-#   - 48 CPU cores for intensive 3D data loading (16 per GPU)
+#   - 2x A100 GPUs with DistributedDataParallel for 3D volumetric processing
+#   - 32 CPU cores for intensive 3D data loading (16 per GPU)
 #   - High memory allocation for 3D volumes (32×256×256 chunks)
 #   - Full 7-day runtime for deep 3D feature learning
 # ============================================================
@@ -65,7 +65,7 @@ echo "Python: $(which python)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
 echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
 echo "GPU count: $(python -c 'import torch; print(torch.cuda.device_count())')"
-for i in $(seq 0 2); do
+for i in $(seq 0 1); do
     echo "GPU $i: $(python -c "import torch; print(torch.cuda.get_device_name($i) if torch.cuda.device_count() > $i else 'N/A')")"
 done
 
