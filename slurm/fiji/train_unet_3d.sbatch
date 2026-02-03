@@ -51,7 +51,9 @@ echo "Learning Rate: $LEARNING_RATE"
 echo "Effective Batch: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 4))"
 echo "=============================================="
 
-cd $SLURM_SUBMIT_DIR/../..
+# Navigate to project root (script is in slurm/fiji/)
+SCRIPT_DIR=$(dirname $(readlink -f $0))
+cd $SCRIPT_DIR/../..
 PROJECT_ROOT=$(pwd)
 echo "Project root: $PROJECT_ROOT"
 
