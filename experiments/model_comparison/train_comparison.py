@@ -196,6 +196,17 @@ def parse_args():
         help='Use pinned memory for faster GPU transfer (may increase memory usage)'
     )
     parser.add_argument(
+        '--persistent_workers',
+        action='store_true',
+        help='Keep workers alive between epochs (faster but uses more memory - can cause leaks with 3D data!)'
+    )
+    parser.add_argument(
+        '--prefetch_factor',
+        type=int,
+        default=2,
+        help='Number of batches to prefetch per worker (default: 2, increase for monster jobs)'
+    )
+    parser.add_argument(
         '--amp',
         action='store_true',
         default=True,
@@ -676,10 +687,13 @@ def train_model(args) -> dict:
     }
     
     # Add prefetch_factor and persistent_workers if using multiple workers
-    # These significantly improve I/O pipeline efficiency
+    # IMPORTANT: persistent_workers=False by default to prevent memory leaks with 3D zarr data!
+    # For monster jobs with lots of RAM, use --persistent_workers to keep workers alive
     if args.num_workers > 0:
-        dataloader_kwargs['prefetch_factor'] = 4  # Prefetch 4 batches per worker
-        dataloader_kwargs['persistent_workers'] = True  # Don't respawn workers each epoch
+        dataloader_kwargs['prefetch_factor'] = args.prefetch_factor
+        dataloader_kwargs['persistent_workers'] = args.persistent_workers
+        if is_main_process():
+            print(f"DataLoader: {args.num_workers} workers, prefetch={args.prefetch_factor}, persistent={args.persistent_workers}")
     
     train_loader, val_loader = get_dataloader(
         datasplit_path=datasplit_path,
