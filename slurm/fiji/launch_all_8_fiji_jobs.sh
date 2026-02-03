@@ -10,6 +10,17 @@ echo "Date: $(date)"
 echo "=========================================="
 echo "Working directory: $(pwd)"
 echo ""
+echo "NOTE: Run this from project root:"
+echo "  cd /scratch/Users/gest9386/CellMap-Segmentation"
+echo "  bash slurm/fiji/launch_all_8_fiji_jobs.sh"
+echo ""
+
+# Verify we're in project root
+if [ ! -d "experiments/model_comparison" ]; then
+    echo "ERROR: Must run from CellMap-Segmentation project root!"
+    echo "Current dir: $(pwd)"
+    exit 1
+fi
 
 # Create logs directory
 mkdir -p logs
