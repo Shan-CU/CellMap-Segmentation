@@ -28,11 +28,11 @@
 MODEL="resnet"
 DIM="2d"
 EPOCHS=200
-BATCH_SIZE=32
+BATCH_SIZE=48
 ITERATIONS_PER_EPOCH=1000
-LEARNING_RATE=5e-5
+LEARNING_RATE=1e-4
 GRADIENT_ACCUMULATION=4
-NUM_WORKERS=4
+NUM_WORKERS=12
 
 echo "=============================================="
 echo "CellMap Model Comparison - ResNet 2D (Fiji)"
@@ -71,7 +71,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # ============================================================
 # A100 Optimizations (from Sycamore H100)
 # ============================================================
-export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
+export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0

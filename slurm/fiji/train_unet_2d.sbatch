@@ -64,7 +64,7 @@ echo "CUDA: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # A100 Optimizations
-export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
+export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
