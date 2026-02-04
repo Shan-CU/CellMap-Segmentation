@@ -221,9 +221,9 @@ SWIN_2D_CONFIG = {
     'num_heads': [3, 6, 12, 24],
     'window_size': [7, 7],
     'num_classes': len(CLASSES),
-    'drop_rate': 0.1,           # Dropout for regularization
-    'attn_drop_rate': 0.1,      # Attention dropout to prevent collapse
-    'drop_path_rate': 0.1,      # Stochastic depth for regularization
+    'dropout': 0.1,              # Dropout for regularization
+    'attention_dropout': 0.1,    # Attention dropout to prevent collapse
+    'stochastic_depth_prob': 0.1,  # Stochastic depth for regularization
 }
 
 # Swin Transformer 3D config
@@ -234,9 +234,9 @@ SWIN_3D_CONFIG = {
     'num_heads': [3, 6, 12, 24],
     'window_size': [4, 7, 7],
     'num_classes': len(CLASSES),
-    'drop_rate': 0.1,           # Dropout for regularization
-    'attn_drop_rate': 0.1,      # Attention dropout to prevent collapse
-    'drop_path_rate': 0.1,      # Stochastic depth for regularization
+    'dropout': 0.1,              # Dropout for regularization
+    'attention_dropout': 0.1,    # Attention dropout to prevent collapse
+    'stochastic_depth_prob': 0.1,  # Stochastic depth for regularization
 }
 
 # ViT-V-Net 3D config

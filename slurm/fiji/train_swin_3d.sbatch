@@ -115,7 +115,15 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
 
 EXIT_CODE=$?
 kill $TB_PID 2>/dev/null || true
-
+# Backup checkpoints and logs to backed-up home storage
+echo ""
+echo "Backing up results to home storage (backed up nightly)..."
+HOME_BACKUP=/Users/gest9386/CellMap-Segmentation-backups
+mkdir -p $HOME_BACKUP/checkpoints $HOME_BACKUP/tensorboard $HOME_BACKUP/metrics
+rsync -avz experiments/model_comparison/checkpoints/ $HOME_BACKUP/checkpoints/ 2>&1 | tail -5
+rsync -avz experiments/model_comparison/tensorboard/ $HOME_BACKUP/tensorboard/ 2>&1 | tail -5
+rsync -avz experiments/model_comparison/metrics/ $HOME_BACKUP/metrics/ 2>&1 | tail -5
+echo "Backup complete: $HOME_BACKUP"
 echo ""
 echo "=============================================="
 echo "Training Complete | Exit: $EXIT_CODE"
