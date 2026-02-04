@@ -32,7 +32,7 @@ BATCH_SIZE=48
 ITERATIONS_PER_EPOCH=1000
 LEARNING_RATE=1e-4
 GRADIENT_ACCUMULATION=4
-NUM_WORKERS=12
+NUM_WORKERS=0
 
 echo "=============================================="
 echo "CellMap Model Comparison - ResNet 2D (Fiji)"
@@ -109,8 +109,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers 8 \
-    --prefetch_factor 2 \
+    --num_workers $NUM_WORKERS \
     --pin_memory \
     --amp \
     --no_compile \
