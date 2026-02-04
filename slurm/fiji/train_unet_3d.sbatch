@@ -5,9 +5,9 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
-#SBATCH --gres=gpu:4
-#SBATCH --mem=400G
+#SBATCH --cpus-per-task=32
+#SBATCH --gres=gpu:2
+#SBATCH --mem=140G
 #SBATCH --time=30-00:00:00
 #SBATCH --output=logs/unet_3d_fiji_%j.out
 #SBATCH --error=logs/unet_3d_fiji_%j.err
@@ -65,8 +65,8 @@ echo "CUDA: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # A100 3D Optimizations (OMP threads limited to prevent thread exhaustion)
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 export CUDA_MODULE_LOADING=LAZY

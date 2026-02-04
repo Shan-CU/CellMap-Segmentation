@@ -5,9 +5,9 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:2
-#SBATCH --mem=200G
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:1
+#SBATCH --mem=100G
 #SBATCH --time=30-00:00:00
 #SBATCH --output=logs/swin_2d_fiji_%j.out
 #SBATCH --error=logs/swin_2d_fiji_%j.err
@@ -40,14 +40,14 @@ echo "=============================================="
 echo "Cluster: Fiji (A100)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
-echo "GPUs: 2x A100 80GB"
+echo "GPUs: 1x A100 80GB"
 echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "Start time: $(date)"
 echo "=============================================="
 echo "Model: $MODEL | Dimension: $DIM"
 echo "Epochs: $EPOCHS | Batch Size: $BATCH_SIZE"
 echo "Learning Rate: $LEARNING_RATE"
-echo "Effective Batch: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
+echo "Effective Batch: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 1))"
 echo "=============================================="
 
 PROJECT_ROOT=/scratch/Users/gest9386/CellMap-Segmentation
@@ -64,8 +64,8 @@ echo "CUDA: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # A100 Optimizations (OMP threads limited to prevent thread exhaustion)
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 export CUDA_MODULE_LOADING=LAZY
@@ -98,7 +98,6 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
     --num_workers $NUM_WORKERS \
-    --pin_memory \
     --amp \
     --no_compile \
     --save_features \
