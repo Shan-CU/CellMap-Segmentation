@@ -100,7 +100,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --num_workers $NUM_WORKERS \
     --pin_memory \
     --amp \
-    --no-compile \
+    --no_compile \
     --save_features \
     --vis_every 10
 

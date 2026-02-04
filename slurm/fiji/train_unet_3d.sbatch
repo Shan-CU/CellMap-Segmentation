@@ -105,7 +105,7 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --lr $LEARNING_RATE \
     --num_workers 0 \
     --amp \
-    --no-compile \
+    --no_compile \
     --save_features \
     --vis_every 5
 
