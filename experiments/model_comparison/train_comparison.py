@@ -531,6 +531,14 @@ def train_model(args) -> dict:
     if not _is_worker:
         local_rank, world_size = setup_ddp()
         device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+        
+        # Fix for older Linux kernels that don't support pidfd_open (needed for CUDA IPC with num_workers > 0)
+        # This is required on Fiji cluster nodes
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.memory._set_allocator_settings('expandable_segments:False')
+            except Exception:
+                pass  # Older PyTorch versions may not have this
     else:
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))

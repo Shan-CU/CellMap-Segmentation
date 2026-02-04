@@ -63,9 +63,9 @@ echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null)
 echo "CUDA: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
-# A100 Optimizations
-export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
-export MKL_NUM_THREADS=$OMP_NUM_THREADS
+# A100 Optimizations (OMP threads limited to prevent thread exhaustion)
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 export CUDA_MODULE_LOADING=LAZY
@@ -97,7 +97,8 @@ torchrun --standalone --nproc_per_node=$N_GPUS \
     --batch_size $BATCH_SIZE \
     --iterations_per_epoch $ITERATIONS_PER_EPOCH \
     --lr $LEARNING_RATE \
-    --num_workers $NUM_WORKERS \
+    --num_workers 8 \
+    --prefetch_factor 2 \
     --pin_memory \
     --amp \
     --no_compile \
