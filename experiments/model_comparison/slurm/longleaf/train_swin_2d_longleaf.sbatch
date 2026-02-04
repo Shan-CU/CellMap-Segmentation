@@ -62,6 +62,8 @@ mkdir -p experiments/model_comparison/slurm/longleaf/logs
 module purge
 module load cuda/12.2
 
+# Add micromamba to PATH
+export PATH="$HOME/.local/bin:$PATH"
 export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate csc

@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:3
+#SBATCH --gres=gpu:2
 #SBATCH --mem=256g
 #SBATCH --time=6-00:00:00
 #SBATCH --output=logs/swin_3d_longleaf_%j.out
@@ -39,7 +39,7 @@ echo "=============================================="
 echo "Cluster: UNC Longleaf (A100 40GB)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
-echo "GPUs: 3x A100 40GB"
+echo "GPUs: 2x A100 40GB"
 echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "Start time: $(date)"
 echo "=============================================="
@@ -48,7 +48,7 @@ echo "Dimension: $DIM"
 echo "Epochs: $EPOCHS"
 echo "Batch Size: $BATCH_SIZE (per GPU) - minimal for 3D transformer"
 echo "Gradient Accumulation: $GRADIENT_ACCUMULATION"
-echo "Effective Batch Size: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 3))"
+echo "Effective Batch Size: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
 echo "Num Workers: $NUM_WORKERS (0 to prevent memory leak)"
 echo "=============================================="
 
@@ -65,6 +65,8 @@ mkdir -p experiments/model_comparison/slurm/longleaf/logs
 module purge
 module load cuda/12.2
 
+# Add micromamba to PATH
+export PATH="$HOME/.local/bin:$PATH"
 export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate csc
@@ -82,7 +84,7 @@ export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
 export NVIDIA_TF32_OVERRIDE=1
 export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 
-N_GPUS=3
+N_GPUS=2
 echo "Using $N_GPUS GPUs with DDP"
 
 echo ""
