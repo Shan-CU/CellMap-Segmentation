@@ -65,8 +65,10 @@ echo "CUDA: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # A100 3D Transformer Optimizations (from Sycamore)
-export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
-export MKL_NUM_THREADS=$OMP_NUM_THREADS
+# Limit threads per process to avoid "Thread creation failed" errors
+# With 4 DDP processes, keep total threads reasonable (4 per process = 16 total)
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 export CUDA_MODULE_LOADING=LAZY
