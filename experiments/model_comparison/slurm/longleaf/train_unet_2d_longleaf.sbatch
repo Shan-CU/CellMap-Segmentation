@@ -73,14 +73,14 @@ mkdir -p experiments/model_comparison/slurm/longleaf/logs
 module purge
 module load cuda/12.2
 
-# Use micromamba (user-installed)
-# Add micromamba to PATH
-export PATH="$HOME/.local/bin:$PATH"
-export MAMBA_ROOT_PREFIX="$HOME/micromamba"
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate csc
+# Use micromamba (user-installed) - Fixed for batch mode
+# Use absolute paths for non-interactive batch environment
+export MAMBA_EXE='/nas/longleaf/home/gsgeorge/.local/bin/micromamba'
+export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
+# Environment activation via micromamba run (works in non-interactive batch)
+# Using micromamba run instead of activate for batch compatibility
 
-echo "Python: $(which python)"
+echo "Python: $($MAMBA_EXE run -n csc which python)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null)"
 echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null)"
 echo "GPU count: $(python -c 'import torch; print(torch.cuda.device_count())' 2>/dev/null)"
@@ -116,7 +116,7 @@ echo "Starting training: $MODEL ($DIM)..."
 echo "Estimated completion: ~24-36 hours"
 echo ""
 
-torchrun --standalone --nproc_per_node=$N_GPUS \
+$MAMBA_EXE run -n csc torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model $MODEL \
     --dim $DIM \

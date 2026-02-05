@@ -65,13 +65,13 @@ mkdir -p experiments/model_comparison/slurm/longleaf/logs
 module purge
 module load cuda/12.2
 
-# Add micromamba to PATH
-export PATH="$HOME/.local/bin:$PATH"
-export MAMBA_ROOT_PREFIX="$HOME/micromamba"
-eval "$(micromamba shell hook --shell bash)"
-micromamba activate csc
+# Use absolute paths for non-interactive batch environment
+export MAMBA_EXE='/nas/longleaf/home/gsgeorge/.local/bin/micromamba'
+export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
+# Environment activation via micromamba run (works in non-interactive batch)
+# Using micromamba run instead of activate for batch compatibility
 
-echo "Python: $(which python)"
+echo "Python: $($MAMBA_EXE run -n csc which python)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # Aggressive memory optimization for 3D transformer
@@ -92,7 +92,7 @@ echo "Starting training: $MODEL ($DIM)..."
 echo "WARNING: This is the most memory-intensive model"
 echo ""
 
-torchrun --standalone --nproc_per_node=$N_GPUS \
+$MAMBA_EXE run -n csc torchrun --standalone --nproc_per_node=$N_GPUS \
     experiments/model_comparison/train_comparison.py \
     --model $MODEL \
     --dim $DIM \
