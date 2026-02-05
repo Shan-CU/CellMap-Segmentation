@@ -83,7 +83,7 @@ export NCCL_P2P_LEVEL=NVL
 export NCCL_SHM_DISABLE=0
 export NCCL_IB_DISABLE=1
 
-N_GPUS=4
+N_GPUS=2
 echo "Using $N_GPUS GPUs with DDP"
 
 TB_PORT=$((6006 + SLURM_JOB_ID % 1000))

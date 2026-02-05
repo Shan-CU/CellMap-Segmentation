@@ -92,7 +92,7 @@ export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
 
-N_GPUS=2
+N_GPUS=1
 echo "Using $N_GPUS GPUs with DDP"
 
 # TensorBoard
