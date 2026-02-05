@@ -73,11 +73,17 @@ done
 mkdir -p logs tensorboard checkpoints
 
 # Set environment variables for optimal performance
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# CRITICAL FIX: OMP_NUM_THREADS must be low (4) to prevent thread exhaustion with DDP
+# Using $SLURM_CPUS_PER_TASK (40) causes libgomp: Thread creation failed
+export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
+
+# NUM_WORKERS=0 is optimal for zarr datasets - avoids DataLoader overhead
+NUM_WORKERS=0
+
 # CRITICAL: garbage_collection_threshold=0.9 prevents memory fragmentation/leaks in 3D training
-# expandable_segments helps with 3D memory allocation patterns
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
+# expandable_segments:False required for CUDA IPC compatibility with DDP
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:False,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 # Lazy module loading reduces initial memory overhead (critical for 3D ViT)
 export CUDA_MODULE_LOADING=LAZY
@@ -130,7 +136,11 @@ echo "TensorBoard PID: $TB_PID"
 echo "Starting ViT-V-Net 3D training with DDP (torchrun)..."
 N_GPUS=$(nvidia-smi -L | wc -l)
 echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
-torchrun --standalone --nproc_per_node=$N_GPUS examples/train_vit3d_baseline.py
+echo "Using NUM_WORKERS=$NUM_WORKERS (0 is optimal for zarr datasets)"
+torchrun --standalone --nproc_per_node=$N_GPUS experiments/model_comparison/train_comparison.py \
+    --model_name vit_3d \
+    --num_workers $NUM_WORKERS \
+    --no_compile
 TRAIN_EXIT_CODE=$?
 
 # Cleanup

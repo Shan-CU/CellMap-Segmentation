@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:rtx6000:2
+#SBATCH --gres=gpu:a100:2
 #SBATCH --mem=200G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=logs/swin_blanca_%j.out
@@ -16,13 +16,14 @@
 
 # ============================================================
 # CellMap SwinTransformer 2D Training - BLANCA BIOKEM OPTIMIZED
-# Hardware: blanca-biokem RTX 6000 nodes
-# Resource Request: 2x RTX 6000 (24GB each), 32 CPUs, 200GB RAM
+# Hardware: blanca-biokem A100 nodes (bgpu-biokem1/2)
+# Resource Request: 2x A100 (80GB each), 32 CPUs, 200GB RAM
 # Walltime: 7 days (maximum for priority queue)
 # Optimizations:
 #   - 2 GPUs with DistributedDataParallel (DDP)
-#   - 32 CPU cores for parallel data loading (16 per GPU)
-#   - Full 7-day runtime for maximum training iterations
+#   - OMP_NUM_THREADS=4 to prevent thread exhaustion
+#   - NUM_WORKERS=0 (optimal for zarr datasets)
+#   - --no_compile to avoid stdatomic.h issues
 #   - Mixed precision (AMP) for TensorCore acceleration
 # ============================================================
 
@@ -73,9 +74,17 @@ done
 mkdir -p logs tensorboard checkpoints
 
 # Set environment variables for optimal performance
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# CRITICAL FIX: OMP_NUM_THREADS must be low (4) to prevent thread exhaustion with DDP
+# Using $SLURM_CPUS_PER_TASK (32) causes libgomp: Thread creation failed
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+
+# NUM_WORKERS=0 is optimal for zarr datasets - avoids DataLoader overhead
+NUM_WORKERS=0
+
 # CRITICAL: garbage_collection_threshold=0.9 prevents memory fragmentation/leaks
-export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512,garbage_collection_threshold:0.9"
+# expandable_segments:False required for CUDA IPC compatibility with DDP
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:False,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 # Lazy module loading reduces initial memory overhead
 export CUDA_MODULE_LOADING=LAZY
@@ -122,7 +131,11 @@ echo "TensorBoard PID: $TB_PID"
 echo "Starting SwinTransformer training with DDP (torchrun)..."
 N_GPUS=$(nvidia-smi -L | wc -l)
 echo "Detected $N_GPUS GPUs, launching $N_GPUS processes with torchrun"
-torchrun --standalone --nproc_per_node=$N_GPUS examples/train_swin_baseline.py
+echo "Using NUM_WORKERS=$NUM_WORKERS (0 is optimal for zarr datasets)"
+torchrun --standalone --nproc_per_node=$N_GPUS experiments/model_comparison/train_comparison.py \
+    --model_name swin_2d \
+    --num_workers $NUM_WORKERS \
+    --no_compile
 TRAIN_EXIT_CODE=$?
 
 # Cleanup TensorBoard
