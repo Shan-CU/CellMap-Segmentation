@@ -50,13 +50,29 @@ from cellmap_data.transforms.augment import NaNtoNum, Binarize
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config_shenron import (
-    LOSS_CONFIGS, QUICK_TEST_CLASSES, ALL_CLASSES,
-    CHECKPOINT_DIR, TENSORBOARD_DIR, RESULTS_DIR,
-    SPATIAL_TRANSFORMS_2D, DATALOADER_CONFIG, VALIDATION_CONFIG,
-    CLASS_LOSS_WEIGHTS, USE_AMP, MAX_GRAD_NORM,
-    MODEL_CONFIGS, get_config, get_model_config, ensure_dirs, get_device
-)
+# Auto-detect hostname and import appropriate config
+import socket
+hostname = socket.gethostname().lower()
+
+if 'rocinante' in hostname:
+    from config_rocinante import (
+        LOSS_CONFIGS, QUICK_TEST_CLASSES, ALL_CLASSES,
+        CHECKPOINT_DIR, TENSORBOARD_DIR, RESULTS_DIR,
+        SPATIAL_TRANSFORMS_2D, DATALOADER_CONFIG, VALIDATION_CONFIG,
+        CLASS_LOSS_WEIGHTS, USE_AMP, MAX_GRAD_NORM,
+        MODEL_CONFIGS, get_config, get_model_config, ensure_dirs, get_device
+    )
+    print(f"✓ Using config_rocinante (hostname: {hostname})")
+else:
+    from config_shenron import (
+        LOSS_CONFIGS, QUICK_TEST_CLASSES, ALL_CLASSES,
+        CHECKPOINT_DIR, TENSORBOARD_DIR, RESULTS_DIR,
+        SPATIAL_TRANSFORMS_2D, DATALOADER_CONFIG, VALIDATION_CONFIG,
+        CLASS_LOSS_WEIGHTS, USE_AMP, MAX_GRAD_NORM,
+        MODEL_CONFIGS, get_config, get_model_config, ensure_dirs, get_device
+    )
+    print(f"✓ Using config_shenron (hostname: {hostname})")
+
 from losses import get_loss_function, PerClassComboLoss
 
 
@@ -174,6 +190,13 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         NaNtoNum({"nan": 0, "posinf": None, "neginf": None}),
     ])
     
+    # Override dataloader config for DDP - MUST use 0 workers to avoid fork bomb
+    dataloader_kwargs = DATALOADER_CONFIG.copy()
+    if torch.distributed.is_initialized():
+        dataloader_kwargs['num_workers'] = 0
+        dataloader_kwargs['persistent_workers'] = False
+        log("DDP mode: forcing num_workers=0 to prevent fork bomb")
+    
     train_loader, val_loader = get_dataloader(
         datasplit_path=str(datasplit_path),
         classes=classes,
@@ -185,7 +208,7 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         train_raw_value_transforms=raw_value_transforms,
         val_raw_value_transforms=raw_value_transforms,
         random_validation=True,
-        **DATALOADER_CONFIG,
+        **dataloader_kwargs,
     )
     
     return train_loader, val_loader
@@ -238,6 +261,7 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)  # Remove channel dim → [B, Z, H, W]
         
+        # NOTE: Keep NaN values - loss functions handle them internally
         targets = batch['output'].to(device)
         
         optimizer.zero_grad()
@@ -245,6 +269,7 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
         with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
+        
         if torch.isnan(loss) or torch.isinf(loss):
             if is_main_process():
                 print(f"  WARNING: NaN/Inf loss at batch {batch_idx}, skipping")
@@ -300,6 +325,7 @@ def validate(model, val_loader, criterion, device, classes):
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)  # Remove channel dim → [B, Z, H, W]
         
+        # NOTE: Keep NaN values - loss functions handle them internally
         targets = batch['output'].to(device)
         
         with torch.amp.autocast('cuda', enabled=USE_AMP):
@@ -428,13 +454,25 @@ def run_experiment(
     )
     
     total_steps = config['epochs'] * config['iterations_per_epoch']
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=config['learning_rate'],
-        total_steps=total_steps,
-        pct_start=0.05,
-        anneal_strategy='cos',
-    )
+    
+    # OneCycleLR requires at least 2 steps and reasonable pct_start
+    # With pct_start=0.05, need at least 40 steps (2/0.05) to avoid division by zero
+    # For short runs, use simpler constant LR
+    if total_steps <= 40:
+        log(f"Using constant LR (total_steps={total_steps} too small for OneCycleLR)")
+        scheduler = torch.optim.lr_scheduler.ConstantLR(
+            optimizer,
+            factor=1.0,
+            total_iters=total_steps
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config['learning_rate'],
+            total_steps=total_steps,
+            pct_start=0.05,
+            anneal_strategy='cos',
+        )
     
     # Mixed precision scaler
     scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP)
