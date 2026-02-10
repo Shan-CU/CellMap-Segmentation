@@ -173,6 +173,9 @@ cython_debug/
 *.ckpt
 *.png
 tensorboard/
+experiments/loss_optimization/runs/
+experiments/loss_optimization/checkpoints/
+experiments/loss_optimization/results/
 *.err
 *.out
 *.zip
