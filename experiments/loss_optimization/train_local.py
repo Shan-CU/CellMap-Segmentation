@@ -19,15 +19,26 @@ Usage:
     torchrun --nproc_per_node=4 train_local.py --mode quick_test
 """
 
-import argparse
-import json
+# CRITICAL: Set thread limits BEFORE any imports to prevent thread explosion
 import os
+os.environ['OMP_NUM_THREADS'] = '4'
+os.environ['MKL_NUM_THREADS'] = '4'
+os.environ['OPENBLAS_NUM_THREADS'] = '4'
+os.environ['NUMEXPR_NUM_THREADS'] = '4'
+
+import argparse
+import gc
+import json
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 import torch
+# Set torch internal thread limits
+torch.set_num_threads(4)
+torch.set_num_interop_threads(1)
+
 import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -106,17 +117,31 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
     from cellmap_segmentation_challenge.utils.dataloader import get_dataloader
     
     # Check if datasplit exists, if not create it
+    # Only rank 0 creates the datasplit to avoid memory bloat from multiple processes
     datasplit_path = Path(__file__).parent / "datasplit.csv"
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
     
     if not datasplit_path.exists():
-        log("Creating datasplit.csv...")
-        from cellmap_segmentation_challenge.utils.datasplit import make_datasplit_csv
-        make_datasplit_csv(
-            classes=classes,
-            csv_path=str(datasplit_path),
-            validation_prob=0.15,
-            force_all_classes=False,
-        )
+        if local_rank == 0:
+            log("Creating datasplit.csv (rank 0 only)...")
+            from cellmap_segmentation_challenge.utils.datasplit import make_datasplit_csv
+            from config_shenron import DATA_ROOT
+            # Format: {DATA_ROOT}/{dataset}/{dataset}.zarr/recon-1/{name}
+            search_path = str(DATA_ROOT / "{dataset}/{dataset}.zarr/recon-1/{name}")
+            make_datasplit_csv(
+                classes=classes,
+                csv_path=str(datasplit_path),
+                search_path=search_path,
+                validation_prob=0.15,
+                force_all_classes=False,
+            )
+        # Other ranks wait for rank 0 to finish
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+        else:
+            import time
+            while not datasplit_path.exists():
+                time.sleep(1)
     
     # Input uses the provided shape (supports 2D and 2.5D)
     input_array_info = {"shape": input_shape, "scale": (8, 8, 8)}
@@ -183,13 +208,25 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
     
     for batch_idx, batch in enumerate(train_loader):
         inputs = batch['input'].to(device)
+        
+        # FIX: Handle 2.5D inputs with extra dimension
+        # Dataloader returns [B, 1, Z, H, W] but model expects [B, Z, H, W]
+        if inputs.dim() == 5 and inputs.shape[1] == 1:
+            inputs = inputs.squeeze(1)  # Remove channel dim → [B, Z, H, W]
+        
         targets = batch['output'].to(device)
         
         optimizer.zero_grad()
         
-        with torch.cuda.amp.autocast(enabled=USE_AMP):
+        with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
+        if torch.isnan(loss) or torch.isinf(loss):
+            if is_main_process():
+                print(f"  WARNING: NaN/Inf loss at batch {batch_idx}, skipping")
+            optimizer.zero_grad()
+            del inputs, targets, outputs, loss
+            continue
         
         scaler.scale(loss).backward()
         
@@ -205,6 +242,9 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
         
         if batch_idx % 10 == 0 and is_main_process():
             print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}")
+        
+        # Release memory
+        del inputs, targets, outputs, loss
     
     return total_loss / max(n_batches, 1)
 
@@ -222,20 +262,28 @@ def validate(model, val_loader, criterion, device, classes):
             break
             
         inputs = batch['input'].to(device)
+        
+        # FIX: Handle 2.5D inputs with extra dimension
+        if inputs.dim() == 5 and inputs.shape[1] == 1:
+            inputs = inputs.squeeze(1)  # Remove channel dim → [B, Z, H, W]
+        
         targets = batch['output'].to(device)
         
-        with torch.cuda.amp.autocast(enabled=USE_AMP):
+        with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
         
         total_loss += loss.item()
         n_batches += 1
         
-        # Compute metrics
-        metrics = compute_metrics(outputs, targets)
+        # Compute metrics (detach to prevent gradient accumulation)
+        metrics = compute_metrics(outputs.detach(), targets.detach())
         for i, c in enumerate(classes):
-            all_metrics[c]['dice'].append(metrics['dice_per_class'][i])
-            all_metrics[c]['iou'].append(metrics['iou_per_class'][i])
+            all_metrics[c]['dice'].append(metrics['dice_per_class'][i].item() if torch.is_tensor(metrics['dice_per_class'][i]) else metrics['dice_per_class'][i])
+            all_metrics[c]['iou'].append(metrics['iou_per_class'][i].item() if torch.is_tensor(metrics['iou_per_class'][i]) else metrics['iou_per_class'][i])
+        
+        # Release memory
+        del inputs, targets, outputs, loss
     
     # Average metrics
     avg_metrics = {}
@@ -351,7 +399,7 @@ def run_experiment(
     )
     
     # Mixed precision scaler
-    scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
+    scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP)
     
     # TensorBoard
     writer = None
@@ -417,6 +465,10 @@ def run_experiment(
                 'dice_mean': val_metrics['dice_mean'],
                 'per_class': val_metrics['per_class'],
             })
+        
+        # Force garbage collection after each epoch
+        torch.cuda.empty_cache()
+        gc.collect()
     
     elapsed = time.time() - start_time
     log(f"\nTraining complete in {elapsed/60:.1f} minutes")
@@ -449,11 +501,18 @@ def run_loss_comparison(config: dict, model_name: str = 'unet_2d'):
     """Run comparison of all loss functions with a single model."""
     
     losses_to_test = [
-        'baseline_bce',
-        'dice_bce',
-        'focal',
-        'combo',
-        'per_class_weighted',
+        # Reference
+        'baseline_bce',                    # 1. Anchor (scored 0.028)
+        # Proven winner
+        'tversky_precision',               # 2. α=0.7 β=0.3 (scored 0.370!)
+        # Explore α/β space around the winner
+        'tversky_precision_mild',          # 3. α=0.6 β=0.4 — less precision
+        'tversky_precision_strong',        # 4. α=0.8 β=0.2 — more precision
+        # Does per-class weighting improve the winner?
+        'per_class_tversky_precision',     # 5. α=0.7 + class weights
+        'per_class_tversky_precision_strong', # 6. α=0.8 + class weights
+        # Does per-class weighted Dice+BCE+Focal beat Tversky?
+        'per_class_weighted_focal',        # 7. BCE+Dice+Focal + class weights
     ]
     
     results = {}

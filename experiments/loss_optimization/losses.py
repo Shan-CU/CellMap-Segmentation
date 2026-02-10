@@ -336,12 +336,18 @@ class PerClassComboLoss(nn.Module):
         class_weights: Optional[Dict[str, float]] = None,
         bce_weight: float = 0.4,
         dice_weight: float = 0.6,
+        focal_weight: float = 0.0,
+        focal_gamma: float = 2.0,
+        focal_alpha: float = 0.25,
         smooth: float = 1e-6,
     ):
         super().__init__()
         self.classes = classes
         self.bce_weight = bce_weight
         self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+        self.focal_gamma = focal_gamma
+        self.focal_alpha = focal_alpha
         self.smooth = smooth
         
         # Use provided weights or defaults
@@ -352,9 +358,14 @@ class PerClassComboLoss(nn.Module):
             torch.tensor(weight_list, dtype=torch.float32)
         )
         
-        print(f"PerClassComboLoss initialized with weights:")
+        components = []
+        if bce_weight > 0: components.append(f'BCE({bce_weight})')
+        if dice_weight > 0: components.append(f'Dice({dice_weight})')
+        if focal_weight > 0: components.append(f'Focal({focal_weight}, γ={focal_gamma})')
+        print(f"PerClassComboLoss initialized: {' + '.join(components)}")
+        print(f"  Class weights:")
         for c, w in zip(classes, weight_list):
-            print(f"  {c}: {w:.1f}")
+            print(f"    {c}: {w:.1f}")
     
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
@@ -381,7 +392,7 @@ class PerClassComboLoss(nn.Module):
             bce = F.binary_cross_entropy_with_logits(
                 pred_c, target_clean, reduction='none'
             )
-            bce_loss = (bce * valid_mask).sum() / valid_mask.sum()
+            bce_loss = (bce * valid_mask).sum() / valid_mask.sum().clamp(min=1)
             
             # Dice for this class
             pred_sigmoid = torch.sigmoid(pred_c)
@@ -394,12 +405,108 @@ class PerClassComboLoss(nn.Module):
             )
             dice_loss = 1 - dice
             
+            # Focal for this class (reuses BCE computation)
+            focal_loss = 0.0
+            if self.focal_weight > 0:
+                pt = torch.exp(-bce)  # probability of correct class
+                focal_mod = (1 - pt) ** self.focal_gamma
+                alpha_t = target_clean * self.focal_alpha + (1 - target_clean) * (1 - self.focal_alpha)
+                focal_loss = (alpha_t * focal_mod * bce * valid_mask).sum() / valid_mask.sum().clamp(min=1)
+            
             # Combine and weight
-            class_loss = self.bce_weight * bce_loss + self.dice_weight * dice_loss
+            class_loss = (self.bce_weight * bce_loss 
+                         + self.dice_weight * dice_loss 
+                         + self.focal_weight * focal_loss)
             weighted_loss = self.weights[c] * class_loss
             total_loss += weighted_loss
         
         return total_loss / n_classes
+
+
+class PerClassTverskyLoss(nn.Module):
+    """
+    Per-class weighted Tversky loss.
+    
+    Combines per-class weighting (to boost hard classes) with Tversky's
+    asymmetric FP/FN trade-off. With beta > alpha, this penalizes false
+    negatives more heavily — ideal for thin structures (membranes) where
+    missing a pixel is worse than hallucinating one.
+    
+    Args:
+        classes: List of class names
+        class_weights: Dict mapping class name -> weight multiplier
+        alpha: FP weight (higher = penalize false positives more)
+        beta: FN weight (higher = penalize false negatives more)
+        smooth: Smoothing factor
+    """
+    
+    def __init__(
+        self,
+        classes: list,
+        class_weights: Optional[Dict[str, float]] = None,
+        alpha: float = 0.3,
+        beta: float = 0.7,
+        smooth: float = 1e-6,
+    ):
+        super().__init__()
+        self.classes = classes
+        self.alpha = alpha
+        self.beta = beta
+        self.smooth = smooth
+        
+        weights = class_weights or PerClassComboLoss.DEFAULT_WEIGHTS
+        weight_list = [weights.get(c, 1.0) for c in classes]
+        self.register_buffer(
+            'weights',
+            torch.tensor(weight_list, dtype=torch.float32)
+        )
+        
+        print(f"PerClassTverskyLoss initialized (α={alpha}, β={beta}):")
+        for c, w in zip(classes, weight_list):
+            print(f"  {c}: {w:.1f}")
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        batch_size, n_classes = pred.shape[:2]
+        total_loss = 0.0
+        
+        for c in range(n_classes):
+            pred_c = pred[:, c:c+1]
+            target_c = target[:, c:c+1]
+            
+            # Handle NaN
+            valid_mask = ~target_c.isnan()
+            target_clean = target_c.nan_to_num(0)
+            
+            if valid_mask.sum() == 0:
+                continue
+            
+            pred_sigmoid = torch.sigmoid(pred_c)
+            pred_flat = (pred_sigmoid * valid_mask).flatten()
+            target_flat = (target_clean * valid_mask).flatten()
+            
+            # Tversky components
+            tp = (pred_flat * target_flat).sum()
+            fp = (pred_flat * (1 - target_flat)).sum()
+            fn = ((1 - pred_flat) * target_flat).sum()
+            
+            denom = tp + self.alpha * fp + self.beta * fn + self.smooth
+            tversky = (tp + self.smooth) / denom.clamp(min=self.smooth)
+            class_loss = 1 - tversky
+            
+            weighted_loss = self.weights[c] * class_loss
+            total_loss += weighted_loss
+        
+        return total_loss / n_classes
+
+
+class NaNSafeBCEWithLogitsLoss(nn.Module):
+    """BCEWithLogitsLoss that handles NaN targets by masking them out."""
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        valid_mask = ~target.isnan()
+        target_clean = target.nan_to_num(0)
+        bce = F.binary_cross_entropy_with_logits(pred, target_clean, reduction='none')
+        return (bce * valid_mask).sum() / valid_mask.sum().clamp(min=1)
 
 
 # Convenience function to create loss from config
@@ -423,7 +530,7 @@ def get_loss_function(
     loss_type = loss_type.lower()
     
     if loss_type == 'bce':
-        return nn.BCEWithLogitsLoss(**kwargs)
+        return NaNSafeBCEWithLogitsLoss()
     elif loss_type == 'dice':
         return DiceLoss(**kwargs)
     elif loss_type == 'dice_bce':
@@ -438,5 +545,9 @@ def get_loss_function(
         if classes is None:
             raise ValueError("classes must be provided for per_class_combo loss")
         return PerClassComboLoss(classes=classes, **kwargs)
+    elif loss_type == 'per_class_tversky':
+        if classes is None:
+            raise ValueError("classes must be provided for per_class_tversky loss")
+        return PerClassTverskyLoss(classes=classes, **kwargs)
     else:
         raise ValueError(f"Unknown loss type: {loss_type}")

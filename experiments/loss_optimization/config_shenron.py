@@ -18,8 +18,9 @@ N_GPUS = 4
 GPU_MEMORY_GB = 11
 TOTAL_CPU_THREADS = 32
 
-# Workers per GPU - leave some threads for main process
-NUM_WORKERS = 6  # 6 * 4 = 24 workers, leaves 8 for main processes
+# Workers per GPU - MUST BE 0 in DDP context to prevent fork bomb
+# DataLoader workers + DDP + OpenMP = exponential thread explosion
+NUM_WORKERS = 0  # Only safe option with DDP
 
 # ============================================================
 # PATHS (for Shenron)
@@ -48,24 +49,24 @@ OUTPUT_SHAPE = (1, 256, 256)  # Always predict single slice
 MODEL_CONFIGS = {
     'unet_2d': {
         'input_channels': 1,
-        'input_shape': (1, 256, 256),   # Single Z-slice
-        'batch_size': 12,               # Safe for 11GB GPU
+        'input_shape': (1, 256, 256),
+        'batch_size': 28,  # 4 GPUs × 28 = 112 per step - optimized for 11GB GPUs
         'description': '2D UNet - single slice input',
     },
     'unet_25d': {
         'input_channels': 5,
-        'input_shape': (5, 256, 256),   # 5 adjacent Z-slices as channels
-        'batch_size': 8,                # Lower due to 5x input channels
+        'input_shape': (5, 256, 256),
+        'batch_size': 18,  # 4 GPUs × 18 = 72 per step - 5x input channels
         'description': '2.5D UNet - 5 adjacent Z-slices for context',
     },
 }
 
 # Legacy batch sizes dict for compatibility
 BATCH_SIZES = {
-    'unet_2d': 12,
-    'unet_25d': 8,
-    'resnet_2d': 10,
-    'swin_2d': 6,
+    'unet_2d': 28,
+    'unet_25d': 18,
+    'resnet_2d': 24,
+    'swin_2d': 14,
 }
 
 # Scale - use 8nm isotropic (common for this data)
@@ -92,33 +93,37 @@ QUICK_TEST_CLASSES = [
 ]
 
 # Class weights for loss (boost hard classes)
-# Weights are INVERSELY proportional to Dice score from UNet 2D evaluation:
-#   Dice < 0.15 -> weight 3.0-3.5 (critical)
-#   Dice 0.15-0.25 -> weight 2.0-2.5 (hard)
-#   Dice 0.25-0.40 -> weight 1.5 (moderate)
-#   Dice > 0.40 -> weight 1.0 (good)
+# REVISED based on Feb 6 2026 experiment results:
+# Previous weights (3.5× for nuc) were TOO aggressive and prevented learning
+# New strategy: Moderate boost (1.2-1.8×) to balance without starving easy classes
+#
+# Feb 6 Results with old weights:
+#   nuc: 0.000 (was 3.5×) - completely failed to learn
+#   golgi_mem: 0.0001 (was 1.0×) - collapsed from starvation
+#   mito_mem: 0.070 (was 1.8×) - showed some learning
+#
 CLASS_LOSS_WEIGHTS = {
-    # Critical (Dice < 0.15) - need heavy boosting
-    'endo_mem': 3.0,    # 0.081 Dice - worst performer
-    'endo_lum': 3.0,    # 0.099 Dice
-    'nuc': 3.5,         # 0.111 Dice - composite class, needs 3D context
-    'pm': 2.5,          # 0.113 Dice - thin boundary
-    'er_mem': 2.5,      # 0.116 Dice
-    'er_lum': 2.0,      # 0.143 Dice
+    # Critical classes - moderate boost to encourage learning without preventing it
+    'nuc': 1.8,         # 0.111 baseline - composite class (reduced from 3.5)
+    'endo_mem': 1.7,    # 0.081 baseline - worst performer (reduced from 3.0)
+    'endo_lum': 1.7,    # 0.099 baseline (reduced from 3.0)
+    'pm': 1.6,          # 0.113 baseline - thin boundary (reduced from 2.5)
+    'er_mem': 1.6,      # 0.116 baseline (reduced from 2.5)
+    'er_lum': 1.5,      # 0.143 baseline (reduced from 2.0)
     
-    # Hard (Dice 0.15-0.25)
-    'ves_mem': 2.0,     # 0.193 Dice
-    'mito_mem': 1.8,    # 0.218 Dice - worse than expected
+    # Hard classes - small boost
+    'ves_mem': 1.4,     # 0.193 baseline (reduced from 2.0)
+    'mito_mem': 1.3,    # 0.218 baseline (reduced from 1.8)
     
-    # Moderate (Dice 0.25-0.40)
-    'mito_lum': 1.5,    # 0.257 Dice
-    'ves_lum': 1.5,     # 0.270 Dice
-    'ecs': 1.5,         # 0.291 Dice
-    'golgi_lum': 1.5,   # 0.317 Dice
+    # Moderate classes - minimal boost to maintain baseline
+    'mito_lum': 1.2,    # 0.257 baseline (reduced from 1.5)
+    'ves_lum': 1.2,     # 0.270 baseline (reduced from 1.5)
+    'ecs': 1.2,         # 0.291 baseline (reduced from 1.5)
+    'golgi_lum': 1.2,   # 0.317 baseline (reduced from 1.5)
     
-    # Good (Dice > 0.40) - no boost needed
-    'mito_ribo': 1.0,   # 0.643 Dice - good!
-    'golgi_mem': 1.0,   # 0.680 Dice - best performer
+    # Good classes - maintain some weight so they help train features
+    'mito_ribo': 1.0,   # 0.643 baseline - keep as anchor
+    'golgi_mem': 1.1,   # 0.680 baseline - slight boost to prevent starvation
 }
 
 # ============================================================
@@ -129,38 +134,40 @@ CLASS_LOSS_WEIGHTS = {
 QUICK_TEST_CONFIG = {
     'epochs': 5,
     'iterations_per_epoch': 50,
-    'batch_size': 12,
+    'batch_size': 28,
     'learning_rate': 1e-4,
     'classes': QUICK_TEST_CLASSES,
     'validate_every': 2,
 }
 
-# Loss comparison configuration (1-2 hours)
+# Loss comparison configuration (~2.5-3 hours)
+# UPDATED: 30 epochs to give weighted losses fair convergence time
 LOSS_COMPARISON_CONFIG = {
-    'epochs': 20,
+    'epochs': 30,
     'iterations_per_epoch': 100,
-    'batch_size': 12,
+    'batch_size': 28,
     'learning_rate': 1e-4,
     'classes': QUICK_TEST_CLASSES,
     'validate_every': 5,
 }
 
-# 2D vs 2.5D Model comparison configuration (2-4 hours total)
+# 2D vs 2.5D Model comparison configuration (2-4 hours with 4 GPUs)
 # Run 2D first, then 2.5D, compare results
+# UPDATED: Increased epochs based on Feb 6 results (30 epochs insufficient)
 MODEL_COMPARISON_CONFIG = {
-    'epochs': 30,
-    'iterations_per_epoch': 100,
+    'epochs': 50,  # Increased from 30 - complex weighted loss needs more time
+    'iterations_per_epoch': 100,  # Full training with 128GB RAM
     'learning_rate': 1e-4,
     'classes': QUICK_TEST_CLASSES,  # 5 classes including nuc
     'validate_every': 5,
-    'loss': 'per_class_weighted',   # Use best loss from prior experiments
+    'loss': 'per_class_weighted',
 }
 
 # Full training configuration (8-12 hours)
 FULL_TRAIN_CONFIG = {
     'epochs': 100,
     'iterations_per_epoch': 200,
-    'batch_size': 12,
+    'batch_size': 28,
     'learning_rate': 1e-4,
     'classes': ALL_CLASSES,
     'validate_every': 10,
@@ -246,6 +253,56 @@ LOSS_CONFIGS = {
         'beta': 0.7,  # Higher = penalize FN more = higher recall
         'description': 'Tversky loss favoring recall',
     },
+    
+    'per_class_weighted_focal': {
+        'type': 'per_class_combo',
+        'bce_weight': 0.3,
+        'dice_weight': 0.5,
+        'focal_weight': 0.2,
+        'focal_gamma': 2.0,
+        'class_weights': CLASS_LOSS_WEIGHTS,
+        'description': 'Per-class weighted Dice+BCE+Focal (best of both worlds)',
+    },
+    
+    'per_class_tversky_recall': {
+        'type': 'per_class_tversky',
+        'alpha': 0.3,
+        'beta': 0.7,
+        'class_weights': CLASS_LOSS_WEIGHTS,
+        'description': 'Per-class weighted Tversky favoring recall (thin structures)',
+    },
+    
+    # --- Tversky precision exploration (based on friend's results: α=0.7 → 0.370 Dice) ---
+    
+    'tversky_precision_mild': {
+        'type': 'tversky',
+        'alpha': 0.6,
+        'beta': 0.4,
+        'description': 'Tversky mild precision bias (α=0.6)',
+    },
+    
+    'tversky_precision_strong': {
+        'type': 'tversky',
+        'alpha': 0.8,
+        'beta': 0.2,
+        'description': 'Tversky strong precision bias (α=0.8)',
+    },
+    
+    'per_class_tversky_precision': {
+        'type': 'per_class_tversky',
+        'alpha': 0.7,
+        'beta': 0.3,
+        'class_weights': CLASS_LOSS_WEIGHTS,
+        'description': 'Per-class weighted Tversky precision (α=0.7)',
+    },
+    
+    'per_class_tversky_precision_strong': {
+        'type': 'per_class_tversky',
+        'alpha': 0.8,
+        'beta': 0.2,
+        'class_weights': CLASS_LOSS_WEIGHTS,
+        'description': 'Per-class weighted Tversky strong precision (α=0.8)',
+    },
 }
 
 # ============================================================
@@ -263,10 +320,10 @@ SPATIAL_TRANSFORMS_2D = {
 # ============================================================
 
 DATALOADER_CONFIG = {
-    'num_workers': NUM_WORKERS,
-    'pin_memory': True,
-    'persistent_workers': True,
-    'prefetch_factor': 2,
+    'num_workers': 0,  # CRITICAL: Must be 0 with DDP to prevent fork bomb
+    'pin_memory': True,  # Faster GPU transfer, using 128GB RAM
+    'persistent_workers': False,
+    'prefetch_factor': None,
 }
 
 # ============================================================
