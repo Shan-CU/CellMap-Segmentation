@@ -43,6 +43,8 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
+import torchvision.transforms.v2 as T
+from cellmap_data.transforms.augment import NaNtoNum, Binarize
 
 # Add parent paths for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -155,6 +157,23 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
     log(f"Input shape: {input_shape} ({'2.5D' if input_shape[0] > 1 else '2D'})")
     log(f"Output shape: (1, 256, 256)")
     
+    # FIX: Use explicit /255.0 normalization instead of T.ToDtype(scale=True).
+    # When spatial transforms (rotation) are applied, xarray.interp() returns float64
+    # instead of uint8. T.ToDtype(scale=True) only scales int->float conversions,
+    # so float64->float32 is NOT scaled, leaving training data in [0, 255] while
+    # validation data (uint8 path) gets correctly scaled to [0, 1].
+    # We clamp to [0, 1] after dividing to handle any interpolation overshoot.
+    def _normalize_to_float32(x):
+        x = x.float()
+        if x.max() > 1.5:  # Raw uint8 range [0, 255]
+            x = x / 255.0
+        return x.clamp(0.0, 1.0)
+    
+    raw_value_transforms = T.Compose([
+        T.Lambda(_normalize_to_float32),
+        NaNtoNum({"nan": 0, "posinf": None, "neginf": None}),
+    ])
+    
     train_loader, val_loader = get_dataloader(
         datasplit_path=str(datasplit_path),
         classes=classes,
@@ -163,6 +182,9 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         target_array_info=target_array_info,
         spatial_transforms=SPATIAL_TRANSFORMS_2D,
         iterations_per_epoch=iterations_per_epoch,
+        train_raw_value_transforms=raw_value_transforms,
+        val_raw_value_transforms=raw_value_transforms,
+        random_validation=True,
         **DATALOADER_CONFIG,
     )
     
