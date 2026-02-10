@@ -60,6 +60,10 @@ from losses import get_loss_function, PerClassComboLoss
 
 def setup_ddp():
     """Initialize DDP if running with torchrun."""
+    # Check for single GPU mode
+    if os.environ.get('SINGLE_GPU_MODE') == '1':
+        return 0, 0, 1
+    
     if 'RANK' in os.environ:
         rank = int(os.environ['RANK'])
         local_rank = int(os.environ['LOCAL_RANK'])
@@ -165,39 +169,37 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
     return train_loader, val_loader
 
 
-def compute_metrics(pred, target):
-    """Compute Dice and IoU metrics."""
-    pred_binary = (torch.sigmoid(pred) > 0.5).float()
+def compute_batch_counts(pred, target):
+    """Compute raw TP, FP, FN counts per class for a single batch.
+    
+    Returns integer counts — no smoothing, no averaging.
+    These get accumulated across all val batches, then Dice is computed once.
+    Uses standard threshold=0.5.
+    """
+    pred_sigmoid = torch.sigmoid(pred)
+    pred_binary = (pred_sigmoid > 0.5).float()
     
     # Handle NaN in target
     valid_mask = ~target.isnan()
     target_clean = target.nan_to_num(0)
     
-    # Per-class metrics
-    dice_scores = []
-    iou_scores = []
+    tp_list = []
+    fp_list = []
+    fn_list = []
     
     for c in range(pred.shape[1]):
         pred_c = pred_binary[:, c] * valid_mask[:, c]
         target_c = target_clean[:, c] * valid_mask[:, c]
         
-        intersection = (pred_c * target_c).sum()
-        pred_sum = pred_c.sum()
-        target_sum = target_c.sum()
-        union = pred_sum + target_sum - intersection
+        tp = (pred_c * target_c).sum().item()
+        fp = (pred_c * (1 - target_c)).sum().item()
+        fn = ((1 - pred_c) * target_c).sum().item()
         
-        dice = (2 * intersection + 1e-6) / (pred_sum + target_sum + 1e-6)
-        iou = (intersection + 1e-6) / (union + 1e-6)
-        
-        dice_scores.append(dice.item())
-        iou_scores.append(iou.item())
+        tp_list.append(tp)
+        fp_list.append(fp)
+        fn_list.append(fn)
     
-    return {
-        'dice_per_class': dice_scores,
-        'iou_per_class': iou_scores,
-        'dice_mean': sum(dice_scores) / len(dice_scores),
-        'iou_mean': sum(iou_scores) / len(iou_scores),
-    }
+    return {'tp': tp_list, 'fp': fp_list, 'fn': fn_list}
 
 
 def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch):
@@ -251,11 +253,20 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
 
 @torch.no_grad()
 def validate(model, val_loader, criterion, device, classes):
-    """Validate model."""
+    """Validate model with global micro-averaged Dice.
+    
+    Accumulates TP/FP/FN across ALL validation batches, then computes
+    Dice once at the end. This avoids smoothing artifacts from per-batch
+    averaging on rare classes.
+    """
     model.eval()
     total_loss = 0
-    all_metrics = {c: {'dice': [], 'iou': []} for c in classes}
     n_batches = 0
+    
+    # Global accumulators
+    global_tp = [0] * len(classes)
+    global_fp = [0] * len(classes)
+    global_fn = [0] * len(classes)
     
     for batch_idx, batch in enumerate(val_loader):
         if batch_idx >= VALIDATION_CONFIG['batch_limit']:
@@ -273,37 +284,42 @@ def validate(model, val_loader, criterion, device, classes):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
         
+        # Print sigmoid stats on first batch
+        if batch_idx == 0 and is_main_process():
+            sigmoid_out = torch.sigmoid(outputs)
+            print("  [Sigmoid stats per class]")
+            for i, c in enumerate(classes):
+                vals = sigmoid_out[:, i].flatten()
+                print(f"    {c}: min={vals.min():.4f}, max={vals.max():.4f}, "
+                      f"mean={vals.mean():.4f}, >0.5: {(vals > 0.5).float().mean()*100:.1f}%")
+        
         total_loss += loss.item()
         n_batches += 1
         
-        # Compute metrics (detach to prevent gradient accumulation)
-        metrics = compute_metrics(outputs.detach(), targets.detach())
-        for i, c in enumerate(classes):
-            all_metrics[c]['dice'].append(metrics['dice_per_class'][i].item() if torch.is_tensor(metrics['dice_per_class'][i]) else metrics['dice_per_class'][i])
-            all_metrics[c]['iou'].append(metrics['iou_per_class'][i].item() if torch.is_tensor(metrics['iou_per_class'][i]) else metrics['iou_per_class'][i])
+        # Accumulate TP/FP/FN counts
+        counts = compute_batch_counts(outputs.detach(), targets.detach())
+        for i in range(len(classes)):
+            global_tp[i] += counts['tp'][i]
+            global_fp[i] += counts['fp'][i]
+            global_fn[i] += counts['fn'][i]
         
         # Release memory
         del inputs, targets, outputs, loss
     
-    # Average metrics
-    avg_metrics = {}
-    for c in classes:
-        if all_metrics[c]['dice']:
-            avg_metrics[c] = {
-                'dice': sum(all_metrics[c]['dice']) / len(all_metrics[c]['dice']),
-                'iou': sum(all_metrics[c]['iou']) / len(all_metrics[c]['iou']),
-            }
-        else:
-            avg_metrics[c] = {'dice': 0, 'iou': 0}
+    # Compute global micro-averaged Dice per class: 2*TP / (2*TP + FP + FN)
+    per_class = {}
+    for i, c in enumerate(classes):
+        tp, fp, fn = global_tp[i], global_fp[i], global_fn[i]
+        denom = 2 * tp + fp + fn
+        dice = (2 * tp / denom) if denom > 0 else 0.0
+        per_class[c] = {'dice': dice, 'tp': int(tp), 'fp': int(fp), 'fn': int(fn)}
     
-    mean_dice = sum(m['dice'] for m in avg_metrics.values()) / len(classes)
-    mean_iou = sum(m['iou'] for m in avg_metrics.values()) / len(classes)
+    mean_dice = sum(m['dice'] for m in per_class.values()) / len(classes)
     
     return {
         'loss': total_loss / max(n_batches, 1),
         'dice_mean': mean_dice,
-        'iou_mean': mean_iou,
-        'per_class': avg_metrics,
+        'per_class': per_class,
     }
 
 
@@ -429,20 +445,22 @@ def run_experiment(
             
             log(f"  Val Loss: {val_metrics['loss']:.4f}")
             log(f"  Val Dice: {val_metrics['dice_mean']:.4f}")
-            log(f"  Per-class Dice:")
+            log(f"  Per-class (global micro-averaged):")
             for c in classes:
-                log(f"    {c}: {val_metrics['per_class'][c]['dice']:.4f}")
+                m = val_metrics['per_class'][c]
+                log(f"    {c}: Dice={m['dice']:.4f}  TP={m['tp']}  FP={m['fp']}  FN={m['fn']}")
             
             # Log to TensorBoard
             if writer:
                 writer.add_scalar('Loss/train', train_loss, epoch)
                 writer.add_scalar('Loss/val', val_metrics['loss'], epoch)
                 writer.add_scalar('Dice/mean', val_metrics['dice_mean'], epoch)
-                writer.add_scalar('IoU/mean', val_metrics['iou_mean'], epoch)
                 writer.add_scalar('LR', scheduler.get_last_lr()[0], epoch)
                 
                 for c in classes:
                     writer.add_scalar(f'Dice/{c}', val_metrics['per_class'][c]['dice'], epoch)
+                    writer.add_scalar(f'FP/{c}', val_metrics['per_class'][c]['fp'], epoch)
+                    writer.add_scalar(f'FN/{c}', val_metrics['per_class'][c]['fn'], epoch)
             
             # Save best model
             if val_metrics['dice_mean'] > best_dice and is_main_process():
@@ -650,8 +668,8 @@ def run_model_comparison(config: dict, loss_name: str = 'per_class_weighted'):
 def main():
     parser = argparse.ArgumentParser(description='Loss optimization and model comparison experiments')
     parser.add_argument('--mode', type=str, default='quick_test',
-                        choices=['quick_test', 'loss_comparison', 'model_comparison', 'full_train'],
-                        help='Training mode')
+                        choices=['quick_test', 'loss_comparison', 'model_comparison', 'full_train', 'single_loss'],
+                        help='Training mode (use single_loss with --loss for parallel GPU runs)')
     parser.add_argument('--model', type=str, default='unet_2d',
                         choices=['unet_2d', 'unet_25d'],
                         help='Model architecture (for single experiment)')
@@ -662,11 +680,27 @@ def main():
                         help='Override number of epochs')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='Override batch size (note: model_comparison uses per-model batch sizes)')
+    parser.add_argument('--single_gpu', action='store_true',
+                        help='Run in single-GPU mode (no DDP, enables num_workers)')
+    parser.add_argument('--num_workers', type=int, default=1,
+                        help='Number of dataloader workers (default=1 for parallel runs)')
     
     args = parser.parse_args()
     
+    # Handle single GPU mode - set environment to skip DDP
+    if args.single_gpu or args.mode == 'single_loss':
+        os.environ['SINGLE_GPU_MODE'] = '1'
+        # Enable workers in single GPU mode (but limited for parallel runs)
+        import config_shenron
+        num_workers = args.num_workers
+        config_shenron.DATALOADER_CONFIG['num_workers'] = num_workers
+        if num_workers > 0:
+            config_shenron.DATALOADER_CONFIG['persistent_workers'] = True
+            config_shenron.DATALOADER_CONFIG['prefetch_factor'] = 2
+        print(f"🚀 Single GPU mode: num_workers={num_workers}, no DDP")
+    
     # Get config
-    config = get_config(args.mode)
+    config = get_config(args.mode if args.mode != 'single_loss' else 'loss_comparison')
     
     # Apply overrides
     if args.epochs:
@@ -675,7 +709,10 @@ def main():
         config['batch_size'] = args.batch_size
     
     # Run based on mode
-    if args.mode == 'loss_comparison':
+    if args.mode == 'single_loss':
+        # Single loss on single GPU - for parallel runs
+        run_experiment(args.loss, config, model_name=args.model)
+    elif args.mode == 'loss_comparison':
         run_loss_comparison(config, model_name=args.model)
     elif args.mode == 'model_comparison':
         run_model_comparison(config, loss_name=args.loss)

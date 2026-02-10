@@ -140,10 +140,10 @@ QUICK_TEST_CONFIG = {
     'validate_every': 2,
 }
 
-# Loss comparison configuration (~2.5-3 hours)
-# UPDATED: 30 epochs to give weighted losses fair convergence time
+# Loss comparison configuration (~6 hours overnight)
+# UPDATED: 60 epochs for proper convergence with Tversky losses
 LOSS_COMPARISON_CONFIG = {
-    'epochs': 30,
+    'epochs': 60,
     'iterations_per_epoch': 100,
     'batch_size': 28,
     'learning_rate': 1e-4,
