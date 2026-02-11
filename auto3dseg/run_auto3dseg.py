@@ -187,8 +187,10 @@ def run_bundle_generation(
     with open(datalist, "r") as f:
         dl = json.load(f)
 
+    # MONAI algorithm templates only accept "CT" or "MRI" as modality.
+    # EM (electron microscopy) is single-channel grayscale like CT, so we use "CT".
     data_src = {
-        "modality": "EM",  # Electron microscopy
+        "modality": "CT",
         "datalist": os.path.abspath(datalist),
         "dataroot": os.path.abspath(dataroot) if dataroot else "",
     }
@@ -255,7 +257,7 @@ def run_full_pipeline(
         dl = json.load(f)
 
     input_cfg = {
-        "modality": "EM",
+        "modality": "CT",  # EM is single-channel grayscale like CT; MONAI only accepts CT/MRI
         "datalist": os.path.abspath(datalist),
         "dataroot": os.path.abspath(dataroot) if dataroot else "",
     }
@@ -280,12 +282,14 @@ def run_full_pipeline(
     runner.set_num_fold(num_fold)
 
     # Set training parameters
+    # If num_epochs <= 0, let each algorithm use its auto-computed epoch count
     default_train_params = {
-        "num_epochs": num_epochs,
         "num_epochs_per_validation": 5,
         "num_images_per_batch": 2,
         "num_warmup_epochs": 5,
     }
+    if num_epochs > 0:
+        default_train_params["num_epochs"] = num_epochs
     if train_params:
         default_train_params.update(train_params)
 

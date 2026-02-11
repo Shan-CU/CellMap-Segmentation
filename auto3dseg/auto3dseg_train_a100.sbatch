@@ -1,33 +1,23 @@
 #!/bin/bash
-#SBATCH --job-name=auto3dseg_train
-#SBATCH --partition=l40-gpu
+#SBATCH --job-name=auto3dseg_a100
+#SBATCH --partition=a100-gpu
 #SBATCH --account=rc_cburch_pi
 #SBATCH --qos=gpu_access
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:nvidia_l40s:2
-#SBATCH --mem=200G
-#SBATCH --time=11-00:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=120G
+#SBATCH --time=6-00:00:00
 #SBATCH --output=logs/auto3dseg_train_%j.out
 #SBATCH --error=logs/auto3dseg_train_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=gsgeorge@unc.edu
 
 # ============================================================
-# Step 3: Auto3DSeg Full Pipeline (Analyze → Generate → Train → Ensemble)
-#
-# Runs the complete MONAI Auto3DSeg pipeline:
-#   1. Data analysis (if not already cached)
-#   2. Algorithm bundle generation (SegResNet, SwinUNETR, etc.)
-#   3. Model training with cross-validation
-#   4. Model ensemble for best predictions
-#
-# Hardware: 2x L40S (48GB each), 16 CPUs, 200GB RAM
-# Walltime: 11 days (maximum for l40-gpu partition)
-#
-# The pipeline caches intermediate results, so it can be safely
-# restarted if it times out - it will resume from where it left off.
+# Auto3DSeg Full Pipeline on A100 GPUs
+# Same as auto3dseg_train.sbatch but targeting a100-gpu partition
+# 2x A100 (40GB each), 16 CPUs, 200GB RAM, 6-day walltime
 # ============================================================
 
 echo "Job ID: $SLURM_JOB_ID"
@@ -42,7 +32,6 @@ cd $PROJECT_DIR
 # --- Environment setup ---
 module purge
 
-# Activate micromamba environment
 export MAMBA_EXE='/nas/longleaf/home/gsgeorge/.local/bin/micromamba'
 export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
 eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)"
@@ -70,7 +59,6 @@ export TORCHINDUCTOR_CACHE_DIR="/tmp/torch_cache_${SLURM_JOB_ID}"
 DATALIST="auto3dseg/nifti_data/datalist.json"
 if [ ! -f "$DATALIST" ]; then
     echo "ERROR: $DATALIST not found!"
-    echo "Run the conversion step first: sbatch auto3dseg/auto3dseg_convert.sbatch"
     exit 1
 fi
 
@@ -79,21 +67,11 @@ N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "Using $N_GPUS GPUs"
 
 # ============================================================
-# Configuration - ADJUST THESE FOR YOUR NEEDS
+# Configuration
 # ============================================================
-# Algorithms to try: segresnet, swinunetr, dints, segresnet2d
-# All 3 architectures: encoder-decoder, transformer, and NAS-discovered
 ALGOS="segresnet swinunetr dints"
-
-# Single fold since we have an explicit train/val split (not k-fold CV)
 NUM_FOLD=1
-
-# Let Auto3DSeg use its auto-computed epochs per algorithm:
-#   SegResNet: 426, SwinUNETR: 354, DiNTS: 200 (+ NAS search)
-# Override with a fixed value if desired (0 = use auto-computed):
-NUM_EPOCHS=0
-
-# ============================================================
+NUM_EPOCHS=0  # 0 = use auto-computed per algorithm
 
 echo ""
 echo "Configuration:"
