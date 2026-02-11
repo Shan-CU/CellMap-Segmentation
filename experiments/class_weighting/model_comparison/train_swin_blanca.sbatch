@@ -98,6 +98,16 @@ echo "=========================================="
 tensorboard --logdir=runs --port=$TB_PORT --bind_all &
 TB_PID=$!
 
+# ── Compute class frequencies (if not already done) ─────────
+if [ ! -f class_frequencies.json ]; then
+    echo ""
+    echo "Computing class frequencies for all 14 classes..."
+    python compute_class_frequencies.py --n_batches 50
+    echo "Class frequencies computed ✓"
+else
+    echo "class_frequencies.json exists ✓"
+fi
+
 # ── Training ─────────────────────────────────────────────────
 echo ""
 echo "Starting Swin Transformer 2D training with DDP ($N_GPUS GPUs)..."

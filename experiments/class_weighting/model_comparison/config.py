@@ -34,19 +34,27 @@ METRICS_DIR = EXPERIMENT_DIR / "metrics"
 FEATURES_DIR = EXPERIMENT_DIR / "features"
 
 # ============================================================
-# CLASSES  (same 5 quick-test classes from class_weighting)
+# CLASSES  (all 14 organelle classes)
 # ============================================================
 
-CLASSES = ['nuc', 'mito_mem', 'er_mem', 'pm', 'golgi_mem']
+CLASSES = [
+    'nuc', 'mito', 'mito_mem', 'mito_ribo', 'golgi', 'golgi_mem',
+    'vesicle', 'vesicle_mem', 'mvb', 'mvb_mem', 'er', 'er_mem',
+    'endo_mem', 'pm',
+]
 N_CLASSES = len(CLASSES)
 
 # ============================================================
-# ESTIMATED VOXEL COUNTS  (auto-load from class_weighting)
+# ESTIMATED VOXEL COUNTS  (auto-load from local or parent)
 # ============================================================
 
 ESTIMATED_VOXEL_COUNTS = None
 
-_FREQ_FILE = CLASS_WEIGHT_DIR / "class_frequencies.json"
+# First try local (14-class), then fallback to parent (5-class)
+_FREQ_FILE = EXPERIMENT_DIR / "class_frequencies.json"
+if not _FREQ_FILE.exists():
+    _FREQ_FILE = CLASS_WEIGHT_DIR / "class_frequencies.json"
+
 if _FREQ_FILE.exists():
     with open(_FREQ_FILE) as _f:
         _freq_data = json.load(_f)
@@ -54,7 +62,7 @@ if _FREQ_FILE.exists():
         ESTIMATED_VOXEL_COUNTS = _freq_data['estimated_voxel_counts']
     print(f"[config] Loaded voxel counts from {_FREQ_FILE}")
 else:
-    print(f"[config] ⚠ {_FREQ_FILE} not found — losses will estimate online")
+    print(f"[config] ⚠ No class_frequencies.json found — run compute_class_frequencies.py first")
 
 # ============================================================
 # LOSS CONFIGURATION  (best from class_weighting: balanced_softmax_tau_1.0)
