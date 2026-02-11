@@ -304,16 +304,46 @@ def run_full_pipeline(
         )
 
     # Enable GPU customization for memory optimization
+    # Auto-detect GPU VRAM and set per-algorithm ranges accordingly
     if gpu_customization:
-        runner.set_gpu_customization(
-            gpu_customization=True,
-            gpu_customization_specs={
+        import torch
+
+        gpu_mem_gb = 0
+        if torch.cuda.is_available():
+            gpu_mem_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+        print(f"  GPU memory detected: {gpu_mem_gb:.0f} GB")
+
+        if gpu_mem_gb >= 70:  # H100 (80GB) or similar
+            specs = {
                 "universal": {
                     "num_trials": 5,
                     "range_num_images_per_batch": [1, 8],
                     "range_num_sw_batch_size": [1, 16],
                 },
-            },
+            }
+        else:  # L40S (48GB), A100 (40GB), etc.
+            specs = {
+                "segresnet": {
+                    "num_trials": 5,
+                    "range_num_images_per_batch": [1, 4],
+                    "range_num_sw_batch_size": [1, 8],
+                },
+                "swinunetr": {
+                    "num_trials": 5,
+                    "range_num_images_per_batch": [1, 2],
+                    "range_num_sw_batch_size": [1, 4],
+                },
+                # DiNTS NAS needs much more VRAM — keep very conservative
+                "dints": {
+                    "num_trials": 3,
+                    "range_num_images_per_batch": [1, 2],
+                    "range_num_sw_batch_size": [1, 2],
+                },
+            }
+
+        runner.set_gpu_customization(
+            gpu_customization=True,
+            gpu_customization_specs=specs,
         )
 
     # Run the full pipeline
