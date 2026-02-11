@@ -120,13 +120,14 @@ QUICK_TEST_CONFIG = {
     'validate_every': 1,
 }
 
-# Loss comparison configuration (2-4 hours with 2 GPUs, 20 epochs per loss)
+# Loss comparison configuration - Full comparison (6-8 hours with 2 GPUs, 80 epochs per loss)
+# Increased for meaningful convergence and fair comparison across loss functions
 LOSS_COMPARISON_CONFIG = {
-    'epochs': 20,
-    'iterations_per_epoch': 50,
+    'epochs': 80,              # Enough epochs to see convergence patterns
+    'iterations_per_epoch': 100,  # 100 batches × 24 samples = 2400 samples per epoch
     'learning_rate': 1e-4,
-    'classes': QUICK_TEST_CLASSES,
-    'validate_every': 5,
+    'classes': QUICK_TEST_CLASSES,  # 5 classes: nuc, mito_mem, er_mem, pm, golgi_mem
+    'validate_every': 2,       # Validate every 2 epochs to track progress
 }
 
 # 2D vs 2.5D Model comparison configuration (2-4 hours with 2 GPUs)

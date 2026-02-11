@@ -29,6 +29,7 @@ os.environ['NUMEXPR_NUM_THREADS'] = '4'
 import argparse
 import gc
 import json
+import logging
 import sys
 import time
 from datetime import datetime
@@ -62,7 +63,7 @@ if 'rocinante' in hostname:
         CLASS_LOSS_WEIGHTS, USE_AMP, MAX_GRAD_NORM,
         MODEL_CONFIGS, get_config, get_model_config, ensure_dirs, get_device
     )
-    print(f"✓ Using config_rocinante (hostname: {hostname})")
+    print(f"[OK] Using config_rocinante (hostname: {hostname})")
 else:
     from config_shenron import (
         LOSS_CONFIGS, QUICK_TEST_CLASSES, ALL_CLASSES,
@@ -71,7 +72,7 @@ else:
         CLASS_LOSS_WEIGHTS, USE_AMP, MAX_GRAD_NORM,
         MODEL_CONFIGS, get_config, get_model_config, ensure_dirs, get_device
     )
-    print(f"✓ Using config_shenron (hostname: {hostname})")
+    print(f"[OK] Using config_shenron (hostname: {hostname})")
 
 from losses import get_loss_function, PerClassComboLoss
 
@@ -115,6 +116,121 @@ def log(msg):
         print(msg)
 
 
+def setup_data_logger(log_dir: Path, run_name: str):
+    """Setup detailed file logger for data pipeline debugging.
+    
+    Returns:
+        logging.Logger: Configured logger that writes to file ONLY (no console output)
+    """
+    log_file = log_dir / f"{run_name}_data_debug.log"
+    
+    # Create logger
+    data_logger = logging.getLogger(f'data_debug_{run_name}')
+    data_logger.setLevel(logging.DEBUG)
+    data_logger.handlers.clear()  # Clear any existing handlers
+    data_logger.propagate = False  # CRITICAL: Don't propagate to root logger (prevents console output)
+    
+    # File handler ONLY - no console output
+    fh = logging.FileHandler(log_file, mode='w')
+    fh.setLevel(logging.DEBUG)
+    
+    # Detailed formatter
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    fh.setFormatter(formatter)
+    data_logger.addHandler(fh)
+    
+    data_logger.info(f"="*80)
+    data_logger.info(f"DATA PIPELINE DEBUG LOG: {run_name}")
+    data_logger.info(f"="*80)
+    
+    return data_logger
+
+
+def log_batch_details(data_logger, batch, phase, batch_idx, classes, detailed=False):
+    """Log comprehensive batch statistics.
+    
+    Args:
+        data_logger: Logger instance
+        batch: Batch dict with 'input' and 'output'
+        phase: 'train' or 'val'
+        batch_idx: Batch index
+        classes: List of class names
+        detailed: If True, log extensive per-sample statistics
+    """
+    if data_logger is None:
+        return
+    
+    data_logger.info(f"\n{'='*80}")
+    data_logger.info(f"{phase.upper()} BATCH {batch_idx}")
+    data_logger.info(f"{'='*80}")
+    
+    # Input statistics
+    inputs = batch['input']
+    data_logger.info(f"\nINPUT:")
+    data_logger.info(f"  Shape: {inputs.shape}")
+    data_logger.info(f"  Dtype: {inputs.dtype}")
+    data_logger.info(f"  Device: {inputs.device}")
+    data_logger.info(f"  Min: {inputs.min().item():.6f}")
+    data_logger.info(f"  Max: {inputs.max().item():.6f}")
+    data_logger.info(f"  Mean: {inputs.mean().item():.6f}")
+    data_logger.info(f"  Std: {inputs.std().item():.6f}")
+    data_logger.info(f"  Has NaN: {torch.isnan(inputs).any().item()}")
+    data_logger.info(f"  Has Inf: {torch.isinf(inputs).any().item()}")
+    
+    if detailed:
+        data_logger.info(f"  Per-sample stats:")
+        for i in range(min(inputs.shape[0], 3)):  # First 3 samples
+            sample = inputs[i]
+            data_logger.info(f"    Sample {i}: min={sample.min().item():.6f}, "
+                           f"max={sample.max().item():.6f}, mean={sample.mean().item():.6f}")
+    
+    # Target/Ground truth statistics
+    targets = batch['output']
+    data_logger.info(f"\nTARGET/GROUND TRUTH:")
+    data_logger.info(f"  Shape: {targets.shape}")
+    data_logger.info(f"  Dtype: {targets.dtype}")
+    data_logger.info(f"  Device: {targets.device}")
+    
+    # Analyze per-class
+    n_classes = targets.shape[1]
+    for c_idx in range(n_classes):
+        class_name = classes[c_idx] if c_idx < len(classes) else f"class_{c_idx}"
+        class_data = targets[:, c_idx]
+        
+        # Check for NaN
+        has_nan = torch.isnan(class_data).any().item()
+        valid_data = class_data[~torch.isnan(class_data)]
+        
+        if valid_data.numel() > 0:
+            data_logger.info(f"  {class_name}:")
+            data_logger.info(f"    Has NaN: {has_nan} ({torch.isnan(class_data).sum().item()} / {class_data.numel()} pixels)")
+            data_logger.info(f"    Valid pixels: {valid_data.numel()}")
+            data_logger.info(f"    Min: {valid_data.min().item():.6f}")
+            data_logger.info(f"    Max: {valid_data.max().item():.6f}")
+            data_logger.info(f"    Mean: {valid_data.mean().item():.6f}")
+            data_logger.info(f"    Unique values: {valid_data.unique().tolist()[:10]}...")  # First 10
+            
+            # Check if binary
+            unique_vals = valid_data.unique()
+            is_binary = len(unique_vals) <= 2 and all(v in [0, 1] for v in unique_vals.tolist())
+            data_logger.info(f"    Is binary (0/1): {is_binary}")
+            
+            if is_binary or (valid_data.min() >= 0 and valid_data.max() <= 1):
+                positive_ratio = (valid_data > 0.5).float().mean().item()
+                data_logger.info(f"    Positive ratio (>0.5): {positive_ratio:.4f}")
+        else:
+            data_logger.info(f"  {class_name}: ALL NaN")
+    
+    # Batch metadata if available
+    if 'metadata' in batch:
+        data_logger.info(f"\nMETADATA:")
+        for key, val in batch['metadata'].items():
+            data_logger.info(f"  {key}: {val}")
+
+
 def create_model(n_classes: int, input_channels: int = 1):
     """Create UNet 2D model.
     
@@ -126,7 +242,7 @@ def create_model(n_classes: int, input_channels: int = 1):
     return UNet_2D(input_channels, n_classes)
 
 
-def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1, 256, 256)):
+def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1, 256, 256), data_logger=None):
     """Create train and validation dataloaders.
     
     Args:
@@ -135,8 +251,18 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         iterations_per_epoch: Number of iterations per epoch
         input_shape: Input shape tuple (Z, H, W). Use (1, 256, 256) for 2D,
                      (5, 256, 256) for 2.5D with 5 adjacent slices.
+        data_logger: Optional logger for data pipeline debugging
     """
     from cellmap_segmentation_challenge.utils.dataloader import get_dataloader
+    
+    if data_logger:
+        data_logger.info(f"\n{'='*80}")
+        data_logger.info("DATALOADER CREATION")
+        data_logger.info(f"{'='*80}")
+        data_logger.info(f"Classes: {classes}")
+        data_logger.info(f"Batch size: {batch_size}")
+        data_logger.info(f"Iterations per epoch: {iterations_per_epoch}")
+        data_logger.info(f"Input shape: {input_shape}")
     
     # Check if datasplit exists, if not create it
     # Only rank 0 creates the datasplit to avoid memory bloat from multiple processes
@@ -153,7 +279,6 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
             make_datasplit_csv(
                 classes=classes,
                 csv_path=str(datasplit_path),
-                search_path=search_path,
                 validation_prob=0.15,
                 force_all_classes=False,
             )
@@ -164,6 +289,20 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
             import time
             while not datasplit_path.exists():
                 time.sleep(1)
+    
+    # Log datasplit info
+    if data_logger and datasplit_path.exists():
+        import pandas as pd
+        df = pd.read_csv(datasplit_path, header=None)
+        data_logger.info(f"\nDATASPLIT INFO:")
+        data_logger.info(f"  Path: {datasplit_path}")
+        data_logger.info(f"  Total crops: {len(df)}")
+        # First column is split type (train/validate)
+        if len(df.columns) > 0:
+            data_logger.info(f"  Train crops: {(df[0] == 'train').sum()}")
+            data_logger.info(f"  Val crops: {(df[0] == 'validate').sum()}")
+        data_logger.info(f"  CSV columns: {len(df.columns)}")
+        data_logger.info(f"  First row sample: {df.iloc[0].tolist() if len(df) > 0 else 'N/A'}")
     
     # Input uses the provided shape (supports 2D and 2.5D)
     input_array_info = {"shape": input_shape, "scale": (8, 8, 8)}
@@ -190,12 +329,37 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         NaNtoNum({"nan": 0, "posinf": None, "neginf": None}),
     ])
     
+    if data_logger:
+        data_logger.info(f"\nTRANSFORMS:")
+        data_logger.info(f"  Spatial transforms type: {type(SPATIAL_TRANSFORMS_2D).__name__}")
+        data_logger.info(f"  Spatial transforms: {SPATIAL_TRANSFORMS_2D}")
+        data_logger.info(f"  Value transforms type: {type(raw_value_transforms).__name__}")
+        data_logger.info(f"  Value transforms: {raw_value_transforms}")
+        # Document what the transforms do
+        data_logger.info(f"  Value transform details:")
+        data_logger.info(f"    - Lambda: Normalize to [0,1] if max>1.5, then clamp to [0,1]")
+        data_logger.info(f"    - NaNtoNum: Convert NaN to 0, keep posinf/neginf as-is")
+        data_logger.info(f"\nARRAY INFO:")
+        data_logger.info(f"  Input: shape={input_array_info['shape']}, scale={input_array_info['scale']}")
+        data_logger.info(f"  Target: shape={target_array_info['shape']}, scale={target_array_info['scale']}")
+    
     # Override dataloader config for DDP - MUST use 0 workers to avoid fork bomb
     dataloader_kwargs = DATALOADER_CONFIG.copy()
     if torch.distributed.is_initialized():
         dataloader_kwargs['num_workers'] = 0
         dataloader_kwargs['persistent_workers'] = False
         log("DDP mode: forcing num_workers=0 to prevent fork bomb")
+    
+    # Store random_validation setting for logging
+    random_validation = True
+    
+    if data_logger:
+        data_logger.info(f"\nDATALOADER CONFIG:")
+        for key, val in dataloader_kwargs.items():
+            data_logger.info(f"  {key}: {val}")
+        data_logger.info(f"  random_validation: {random_validation}")
+        data_logger.info(f"  datasplit_path: {datasplit_path}")
+        data_logger.info(f"  iterations_per_epoch: {iterations_per_epoch}")
     
     train_loader, val_loader = get_dataloader(
         datasplit_path=str(datasplit_path),
@@ -207,9 +371,36 @@ def create_dataloaders(classes, batch_size, iterations_per_epoch, input_shape=(1
         iterations_per_epoch=iterations_per_epoch,
         train_raw_value_transforms=raw_value_transforms,
         val_raw_value_transforms=raw_value_transforms,
-        random_validation=True,
+        random_validation=random_validation,
         **dataloader_kwargs,
     )
+    
+    if data_logger:
+        data_logger.info(f"\nDATALOADER CREATED:")
+        data_logger.info(f"  Train loader: {len(train_loader)} batches/epoch")
+        data_logger.info(f"  Val loader: {len(val_loader)} total batches")
+        # Try to get dataset info
+        if hasattr(train_loader, 'dataset'):
+            train_ds = train_loader.dataset
+            data_logger.info(f"  Train dataset type: {type(train_ds).__name__}")
+            # Check for actual attributes
+            if hasattr(train_ds, '__len__'):
+                try:
+                    data_logger.info(f"  Train dataset length: {len(train_ds)}")
+                except:
+                    data_logger.info(f"  Train dataset length: N/A")
+        if hasattr(val_loader, 'dataset'):
+            val_ds = val_loader.dataset
+            data_logger.info(f"  Val dataset type: {type(val_ds).__name__}")
+            if hasattr(val_ds, '__len__'):
+                try:
+                    data_logger.info(f"  Val dataset length: {len(val_ds)}")
+                except:
+                    data_logger.info(f"  Val dataset length: N/A")
+        
+        # Verify actual batch_size from loader
+        data_logger.info(f"  Train loader batch_size: {train_loader.batch_size if hasattr(train_loader, 'batch_size') else 'N/A'}")
+        data_logger.info(f"  Val loader batch_size: {val_loader.batch_size if hasattr(val_loader, 'batch_size') else 'N/A'}")
     
     return train_loader, val_loader
 
@@ -247,19 +438,34 @@ def compute_batch_counts(pred, target):
     return {'tp': tp_list, 'fp': fp_list, 'fn': fn_list}
 
 
-def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch):
+def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch, data_logger=None, classes=None):
     """Train for one epoch."""
     model.train()
     total_loss = 0
     n_batches = 0
     
     for batch_idx, batch in enumerate(train_loader):
+        # Log first batch of first epoch in detail
+        if epoch == 1 and batch_idx == 0 and data_logger:
+            data_logger.info(f"\n{'#'*80}")
+            data_logger.info(f"FIRST TRAINING BATCH (EPOCH 1)")
+            data_logger.info(f"{'#'*80}")
+            log_batch_details(data_logger, batch, 'train', batch_idx, classes, detailed=True)
+        # Log periodic batches less verbosely
+        elif batch_idx % 50 == 0 and data_logger:
+            log_batch_details(data_logger, batch, 'train', batch_idx, classes, detailed=False)
+        
         inputs = batch['input'].to(device)
         
         # FIX: Handle 2.5D inputs with extra dimension
         # Dataloader returns [B, 1, Z, H, W] but model expects [B, Z, H, W]
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)  # Remove channel dim → [B, Z, H, W]
+        
+        # Log shape transformation if it happened
+        if epoch == 1 and batch_idx == 0 and data_logger:
+            data_logger.info(f"\nAFTER PREPROCESSING (before model):")
+            data_logger.info(f"  Input shape: {inputs.shape} (squeezed if needed)")
         
         # NOTE: Keep NaN values - loss functions handle them internally
         targets = batch['output'].to(device)
@@ -268,11 +474,38 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
         
         with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)
+            
+            # Log model output on first batch
+            if epoch == 1 and batch_idx == 0 and data_logger:
+                data_logger.info(f"\nMODEL OUTPUT (logits):")
+                data_logger.info(f"  Shape: {outputs.shape}")
+                data_logger.info(f"  Dtype: {outputs.dtype}")
+                data_logger.info(f"  Min: {outputs.min().item():.6f}")
+                data_logger.info(f"  Max: {outputs.max().item():.6f}")
+                data_logger.info(f"  Mean: {outputs.mean().item():.6f}")
+                data_logger.info(f"  Std: {outputs.std().item():.6f}")
+                
+                # Show per-class output stats
+                for c_idx in range(outputs.shape[1]):
+                    class_name = classes[c_idx] if classes and c_idx < len(classes) else f"class_{c_idx}"
+                    class_out = outputs[:, c_idx]
+                    data_logger.info(f"  {class_name}: min={class_out.min().item():.4f}, "
+                                   f"max={class_out.max().item():.4f}, mean={class_out.mean().item():.4f}")
+            
             loss = criterion(outputs, targets)
+            
+            # Log loss calculation details on first batch
+            if epoch == 1 and batch_idx == 0 and data_logger:
+                data_logger.info(f"\nLOSS CALCULATION:")
+                data_logger.info(f"  Loss function: {type(criterion).__name__}")
+                data_logger.info(f"  Loss value: {loss.item():.6f}")
+                data_logger.info(f"  Criterion config: {criterion if hasattr(criterion, '__dict__') else 'N/A'}")
         
         if torch.isnan(loss) or torch.isinf(loss):
             if is_main_process():
                 print(f"  WARNING: NaN/Inf loss at batch {batch_idx}, skipping")
+            if data_logger:
+                data_logger.warning(f"  NaN/Inf loss at batch {batch_idx}, skipping")
             optimizer.zero_grad()
             del inputs, targets, outputs, loss
             continue
@@ -299,7 +532,7 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device, epoch
 
 
 @torch.no_grad()
-def validate(model, val_loader, criterion, device, classes):
+def validate(model, val_loader, criterion, device, classes, data_logger=None, epoch=None):
     """Validate model with global micro-averaged Dice.
     
     Accumulates TP/FP/FN across ALL validation batches, then computes
@@ -315,10 +548,20 @@ def validate(model, val_loader, criterion, device, classes):
     global_fp = [0] * len(classes)
     global_fn = [0] * len(classes)
     
+    if data_logger and epoch == 1:
+        data_logger.info(f"\n{'#'*80}")
+        data_logger.info(f"VALIDATION - EPOCH {epoch}")
+        data_logger.info(f"{'#'*80}")
+        data_logger.info(f"Validation batch limit: {VALIDATION_CONFIG['batch_limit']}")
+    
     for batch_idx, batch in enumerate(val_loader):
         if batch_idx >= VALIDATION_CONFIG['batch_limit']:
             break
-            
+        
+        # Log first validation batch in detail
+        if epoch == 1 and batch_idx == 0 and data_logger:
+            log_batch_details(data_logger, batch, 'val', batch_idx, classes, detailed=True)
+        
         inputs = batch['input'].to(device)
         
         # FIX: Handle 2.5D inputs with extra dimension
@@ -340,6 +583,16 @@ def validate(model, val_loader, criterion, device, classes):
                 vals = sigmoid_out[:, i].flatten()
                 print(f"    {c}: min={vals.min():.4f}, max={vals.max():.4f}, "
                       f"mean={vals.mean():.4f}, >0.5: {(vals > 0.5).float().mean()*100:.1f}%")
+            
+            # Also log to file
+            if data_logger and epoch == 1:
+                data_logger.info(f"\nVALIDATION MODEL OUTPUT (first batch):")
+                data_logger.info(f"  Logits shape: {outputs.shape}")
+                data_logger.info(f"  Sigmoid stats per class:")
+                for i, c in enumerate(classes):
+                    vals = sigmoid_out[:, i].flatten()
+                    data_logger.info(f"    {c}: min={vals.min():.4f}, max={vals.max():.4f}, "
+                                   f"mean={vals.mean():.4f}, >0.5: {(vals > 0.5).float().mean()*100:.1f}%")
         
         total_loss += loss.item()
         n_batches += 1
@@ -414,6 +667,16 @@ def run_experiment(
     log(f"Classes: {classes}")
     log(f"{'='*60}\n")
     
+    # Setup data logger (only on main process)
+    data_logger = None
+    if is_main_process():
+        data_logger = setup_data_logger(RESULTS_DIR, run_name)
+        data_logger.info(f"Experiment: {run_name}")
+        data_logger.info(f"Model: {model_name}")
+        data_logger.info(f"Loss: {loss_name}")
+        data_logger.info(f"Classes: {classes}")
+        data_logger.info(f"Config: {config}")
+    
     # Create model with correct input channels
     model = create_model(n_classes, input_channels=input_channels)
     model = model.to(device)
@@ -427,6 +690,7 @@ def run_experiment(
         batch_size=batch_size,
         iterations_per_epoch=config['iterations_per_epoch'],
         input_shape=input_shape,
+        data_logger=data_logger,
     )
     
     # Create loss function
@@ -493,15 +757,19 @@ def run_experiment(
         
         # Train
         train_loss = train_epoch(
-            model, train_loader, criterion, optimizer, scaler, device, epoch
+            model, train_loader, criterion, optimizer, scaler, device, epoch,
+            data_logger=data_logger, classes=classes
         )
         scheduler.step()
         
         log(f"  Train Loss: {train_loss:.4f}")
+        if data_logger:
+            data_logger.info(f"\nEpoch {epoch}: Train Loss = {train_loss:.4f}")
         
         # Validate
         if epoch % config.get('validate_every', 1) == 0:
-            val_metrics = validate(model, val_loader, criterion, device, classes)
+            val_metrics = validate(model, val_loader, criterion, device, classes,
+                                 data_logger=data_logger, epoch=epoch)
             
             log(f"  Val Loss: {val_metrics['loss']:.4f}")
             log(f"  Val Dice: {val_metrics['dice_mean']:.4f}")
@@ -509,6 +777,24 @@ def run_experiment(
             for c in classes:
                 m = val_metrics['per_class'][c]
                 log(f"    {c}: Dice={m['dice']:.4f}  TP={m['tp']}  FP={m['fp']}  FN={m['fn']}")
+                        # Log to file
+            if data_logger:
+                data_logger.info(f"\nEpoch {epoch} Validation Results:")
+                data_logger.info(f"  Val Loss: {val_metrics['loss']:.4f}")
+                data_logger.info(f"  Val Dice (mean): {val_metrics['dice_mean']:.4f}")
+                data_logger.info(f"  Per-class results:")
+                for c in classes:
+                    m = val_metrics['per_class'][c]
+                    data_logger.info(f"    {c}: Dice={m['dice']:.4f}  TP={m['tp']}  FP={m['fp']}  FN={m['fn']}")
+                        # Log to file
+            if data_logger:
+                data_logger.info(f"\nEpoch {epoch} Validation Results:")
+                data_logger.info(f"  Val Loss: {val_metrics['loss']:.4f}")
+                data_logger.info(f"  Val Dice (mean): {val_metrics['dice_mean']:.4f}")
+                data_logger.info(f"  Per-class results:")
+                for c in classes:
+                    m = val_metrics['per_class'][c]
+                    data_logger.info(f"    {c}: Dice={m['dice']:.4f}  TP={m['tp']}  FP={m['fp']}  FN={m['fn']}")
             
             # Log to TensorBoard
             if writer:
