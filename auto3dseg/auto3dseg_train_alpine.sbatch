@@ -40,9 +40,7 @@ echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Start time: $(date)"
 
-# --- CHANGE THIS to your repo path on Alpine ---
-PROJECT_DIR="$HOME/CellMap-Segmentation"
-# e.g. /projects/gest9386/CellMap-Segmentation or wherever you cloned it
+PROJECT_DIR=/projects/gest9386/CellMap-Segmentation
 cd $PROJECT_DIR
 
 # --- Environment setup ---
