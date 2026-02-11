@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=swin_2d_syc
-#SBATCH --partition=h100_sn
+#SBATCH --partition=h100_mn
+#SBATCH --qos=h100_mn
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64
@@ -16,7 +17,7 @@
 # Swin Transformer 2D Training - Optimized for UNC Sycamore (H100 80GB)
 # ============================================================
 # Architecture: Swin Transformer 2D (Transformer - High Memory)
-# Cluster: UNC Sycamore h100_sn partition
+# Cluster: UNC Sycamore h100_mn partition
 # GPUs: 2x H100 80GB
 # Expected training time: ~28-36 hours for 200 epochs
 # Memory usage: ~25-35 GB per GPU

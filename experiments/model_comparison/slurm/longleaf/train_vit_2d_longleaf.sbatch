@@ -39,7 +39,7 @@ echo "GPUs: 2x A100 40GB"
 echo "Start time: $(date)"
 echo "=============================================="
 
-cd $SLURM_SUBMIT_DIR/../../..
+cd $SLURM_SUBMIT_DIR/../../../..
 PROJECT_ROOT=$(pwd)
 echo "Project root: $PROJECT_ROOT"
 

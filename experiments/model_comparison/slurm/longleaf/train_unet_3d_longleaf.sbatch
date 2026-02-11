@@ -53,7 +53,7 @@ echo "Effective Batch Size: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
 echo "Num Workers: $NUM_WORKERS (0 to prevent 3D memory leak)"
 echo "=============================================="
 
-cd $SLURM_SUBMIT_DIR/../../..
+cd $SLURM_SUBMIT_DIR/../../../..
 PROJECT_ROOT=$(pwd)
 echo "Project root: $PROJECT_ROOT"
 

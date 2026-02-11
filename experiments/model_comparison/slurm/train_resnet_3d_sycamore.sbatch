@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=resnet_3d_syc
-#SBATCH --partition=h100_sn
+#SBATCH --partition=h100_mn
+#SBATCH --qos=h100_mn
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
@@ -16,7 +17,7 @@
 # ResNet 3D Training - Optimized for UNC Sycamore (H100 80GB)
 # ============================================================
 # Architecture: ResNet 3D (CNN - Higher Memory for 3D)
-# Cluster: UNC Sycamore h100_sn partition
+# Cluster: UNC Sycamore h100_mn partition
 # GPUs: 4x H100 80GB
 # Expected training time: ~24-32 hours for 150 epochs
 # Memory usage: ~30-40 GB per GPU

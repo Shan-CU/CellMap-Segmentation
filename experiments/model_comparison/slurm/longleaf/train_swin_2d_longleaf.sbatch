@@ -49,7 +49,7 @@ echo "Batch Size: $BATCH_SIZE (per GPU)"
 echo "Effective Batch Size: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
 echo "=============================================="
 
-cd $SLURM_SUBMIT_DIR/../../..
+cd $SLURM_SUBMIT_DIR/../../../..
 PROJECT_ROOT=$(pwd)
 echo "Project root: $PROJECT_ROOT"
 

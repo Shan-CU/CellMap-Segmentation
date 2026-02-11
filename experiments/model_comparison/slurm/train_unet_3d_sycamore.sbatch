@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=unet_3d_syc
-#SBATCH --partition=h100_sn
+#SBATCH --partition=h100_mn
+#SBATCH --qos=h100_mn
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
@@ -16,7 +17,7 @@
 # UNet 3D Training - Optimized for UNC Sycamore (H100 80GB)
 # ============================================================
 # Architecture: UNet 3D (CNN - Moderate Memory for 3D)
-# Cluster: UNC Sycamore h100_sn partition
+# Cluster: UNC Sycamore h100_mn partition
 # GPUs: 4x H100 80GB (3D benefits from more parallelism)
 # Expected training time: ~20-28 hours for 150 epochs
 # Memory usage: ~20-30 GB per GPU

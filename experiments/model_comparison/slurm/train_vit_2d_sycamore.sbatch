@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=vit_2d_syc
-#SBATCH --partition=h100_sn
+#SBATCH --partition=h100_mn
+#SBATCH --qos=h100_mn
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64
@@ -16,7 +17,7 @@
 # ViT 2D Training - Optimized for UNC Sycamore (H100 80GB)
 # ============================================================
 # Architecture: ViT-V-Net 2D (Transformer - High Memory)
-# Cluster: UNC Sycamore h100_sn partition
+# Cluster: UNC Sycamore h100_mn partition
 # GPUs: 2x H100 80GB
 # Expected training time: ~32-40 hours for 200 epochs
 # Memory usage: ~30-40 GB per GPU (global self-attention)

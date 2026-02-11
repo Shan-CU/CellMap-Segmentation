@@ -12,7 +12,7 @@
 #SBATCH --output=logs/auto3dseg_train_%j.out
 #SBATCH --error=logs/auto3dseg_train_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=gsgeorge@unc.edu
+#SBATCH --mail-user=gest9386@colorado.edu
 
 # ============================================================
 # Auto3DSeg Training — Blanca biokem (2x NVIDIA A100 on bgpu-biokem2)

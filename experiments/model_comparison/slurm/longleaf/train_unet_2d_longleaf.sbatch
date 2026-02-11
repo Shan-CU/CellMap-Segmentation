@@ -55,7 +55,7 @@ echo "Effective Batch Size: $((BATCH_SIZE * GRADIENT_ACCUMULATION * 2))"
 echo "=============================================="
 
 # Navigate to project root
-cd $SLURM_SUBMIT_DIR/../../..
+cd $SLURM_SUBMIT_DIR/../../../..
 PROJECT_ROOT=$(pwd)
 echo "Project root: $PROJECT_ROOT"
 
