@@ -48,6 +48,10 @@ export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
 eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)"
 micromamba activate csc
 
+# Fix: Ensure conda's libstdc++ (which has CXXABI_1.3.15) takes priority
+# over the system /lib64/libstdc++ (which doesn't). Required by DiNTS → optuna → sqlite3.
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+
 echo "Python: $(which python)"
 python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 python -c "import torch; [print(f'  GPU {i}: {torch.cuda.get_device_name(i)}') for i in range(torch.cuda.device_count())]"
