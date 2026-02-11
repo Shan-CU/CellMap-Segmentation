@@ -35,7 +35,7 @@ if ! conda env list 2>/dev/null | grep -q "csc"; then
     conda create -n csc python=3.11 -y
 fi
 
-conda activate csc
+conda activate cellmap
 pip install --quiet 'monai[all]' nibabel pyyaml optuna zarr
 
 echo "Python: $(which python)"

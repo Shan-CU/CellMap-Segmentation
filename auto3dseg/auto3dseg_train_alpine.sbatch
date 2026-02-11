@@ -47,7 +47,7 @@ cd $PROJECT_DIR
 module purge
 module load anaconda
 # If using conda:
-conda activate csc
+conda activate cellmap
 # If using micromamba instead, uncomment and adjust:
 # export MAMBA_EXE="$HOME/.local/bin/micromamba"
 # export MAMBA_ROOT_PREFIX="$HOME/micromamba"

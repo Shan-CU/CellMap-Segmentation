@@ -34,7 +34,7 @@ mkdir -p logs auto3dseg/work_dir
 # --- Environment setup ---
 module purge
 module load anaconda
-conda activate csc
+conda activate cellmap
 
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 

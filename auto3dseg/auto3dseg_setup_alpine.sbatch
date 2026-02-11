@@ -48,7 +48,7 @@ if ! conda env list | grep -q "csc"; then
     conda create -n csc python=3.11 -y
 fi
 
-conda activate csc
+conda activate cellmap
 
 # Install packages (pip will skip already-installed)
 pip install --quiet 'monai[all]' nibabel pyyaml optuna
