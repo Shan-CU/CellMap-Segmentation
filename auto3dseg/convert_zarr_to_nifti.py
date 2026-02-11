@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""
-Convert CellMap Zarr data to NIfTI format for MONAI Auto3DSeg.
+"""Convert CellMap Zarr data to NIfTI format for MONAI Auto3DSeg.
 
 This script reads the CellMap datasplit.csv, extracts 3D crops from the zarr
 volumes, and saves them as paired image/label NIfTI files suitable for
 Auto3DSeg's DataAnalyzer and AutoRunner.
 
-Label encoding:
-  - Background = 0
-  - Each of the 14 base classes gets a unique integer ID (1-14)
-  - Auto3DSeg treats this as a standard multi-class segmentation problem
+Label encoding (sigmoid / multi-channel mode):
+  - Output label is a 4D volume: (num_classes, Z, Y, X) = (14, Z, Y, X)
+  - Each channel is a binary mask for one class:
+      1 = class present, 0 = class absent/background
+  - Classes with empty zarr arrays (0 chunks on disk, i.e. unannotated)
+    are encoded as all-zeros but tracked separately so that the loss
+    function ignores them during training.
+  - Auto3DSeg is configured with sigmoid=True so each class is predicted
+    independently, which naturally handles partial/sparse annotations.
 
 Usage:
     python convert_zarr_to_nifti.py \
@@ -91,6 +95,28 @@ def read_zarr_array(zarr_path: str, array_key: str) -> np.ndarray:
     return np.array(arr)
 
 
+def has_zarr_chunks(zarr_path: str, array_key: str) -> bool:
+    """
+    Check if a zarr array has any actual chunk data on disk.
+
+    Many CellMap crops have zarr arrays for all 14 classes, but some are
+    empty placeholders (0 chunks, fill_value=0). These represent
+    *unannotated* classes, not confirmed absence. This function detects
+    them by checking whether any chunk files exist in the s0 directory.
+    """
+    # Build the filesystem path to the zarr array's chunk directory
+    # zarr_path is like: data/jrc_cos7-1a/jrc_cos7-1a.zarr
+    # array_key is like: recon-1/labels/groundtruth/crop234/nuc/s0
+    chunk_dir = os.path.join(zarr_path, array_key)
+    if not os.path.isdir(chunk_dir):
+        return False
+    # Check for any non-metadata files (chunks are numeric like 0.0.0)
+    for entry in os.listdir(chunk_dir):
+        if not entry.startswith(".") and entry not in (".zarray", ".zattrs", ".zgroup"):
+            return True
+    return False
+
+
 def convert_crop(
     raw_zarr_path: str,
     raw_array_key: str,
@@ -99,11 +125,13 @@ def convert_crop(
     output_dir: str,
     crop_id: str,
     target_spacing: tuple[float, float, float] = (8.0, 8.0, 8.0),
-) -> tuple[str, str] | None:
+) -> tuple[str, str, list[str]] | None:
     """
-    Convert a single crop from zarr to NIfTI.
+    Convert a single crop from zarr to NIfTI with multi-channel binary labels.
 
-    Returns (image_path, label_path) or None if conversion fails.
+    Returns (image_path, label_path, annotated_classes) or None if conversion
+    fails. annotated_classes is the list of class names that have actual
+    annotation data (non-empty zarr arrays) in this crop.
     """
     images_dir = os.path.join(output_dir, "images")
     labels_dir = os.path.join(output_dir, "labels")
@@ -115,8 +143,22 @@ def convert_crop(
 
     # Skip if already converted
     if os.path.exists(image_path) and os.path.exists(label_path):
-        print(f"  [SKIP] {crop_id} already converted")
-        return image_path, label_path
+        # Still need to determine annotated classes for the datalist
+        try:
+            crop_path, class_names = parse_label_key(label_array_key)
+            scale_match = re.search(r"/(s\d+)$", label_array_key)
+            scale_suffix = scale_match.group(1) if scale_match else "s0"
+            annotated = [
+                cn for cn in class_names
+                if cn in CLASS_TO_ID and has_zarr_chunks(
+                    label_zarr_path, f"{crop_path}/{cn}/{scale_suffix}"
+                )
+            ]
+        except Exception:
+            annotated = []
+        print(f"  [SKIP] {crop_id} already converted "
+              f"({len(annotated)} annotated classes)")
+        return image_path, label_path, annotated
 
     try:
         # Parse the label key to get crop path and class names
@@ -266,26 +308,36 @@ def convert_crop(
                 padded[pad_slices] = raw_data
                 raw_data = padded
 
-        # Build multi-class label volume
-        # 0 = background, 1-14 = class IDs
-        label_data = np.zeros(label_shape, dtype=np.uint8)
+        # Build multi-channel binary label volume
+        # Shape: (num_classes, Z, Y, X) — one binary channel per class
+        # Channel values: 1 = class present, 0 = class absent/background
+        # We track which classes are actually annotated (have chunk data)
+        # vs unannotated (empty zarr placeholder) for the datalist.
+        num_classes = len(BASE_CLASSES)
+        label_data = np.zeros((num_classes,) + label_shape, dtype=np.uint8)
+        annotated_classes = []
 
         for class_name in class_names:
             if class_name not in CLASS_TO_ID:
                 print(f"  WARNING: Unknown class '{class_name}', skipping")
                 continue
 
-            class_id = CLASS_TO_ID[class_name]
+            class_idx = CLASS_TO_ID[class_name] - 1  # 0-indexed channel
             class_key = f"{crop_path}/{class_name}/{scale_suffix}"
+
+            # Check if this class has actual annotation data on disk
+            if not has_zarr_chunks(label_zarr_path, class_key):
+                # Empty zarr = unannotated, leave channel as all-zeros
+                # This class will be excluded from this crop's loss
+                continue
 
             try:
                 class_arr = np.array(label_store[class_key])
                 # In CellMap: 0 = absent, 255 = unknown, other values = instance IDs
                 # For semantic segmentation: nonzero and not 255 = class present
                 mask = (class_arr > 0) & (class_arr != 255)
-                # Only assign if not already assigned (first class wins for overlaps)
-                unassigned = label_data == 0
-                label_data[mask & unassigned] = class_id
+                label_data[class_idx][mask] = 1
+                annotated_classes.append(class_name)
             except KeyError:
                 print(f"  WARNING: Class array not found: {class_key}")
 
@@ -297,18 +349,21 @@ def convert_crop(
         affine[1, 1] = target_spacing[1]
         affine[2, 2] = target_spacing[2]
 
-        # Save image (add channel dim for MONAI: shape goes from ZYX to ZYX)
+        # Save image
         img_nii = nib.Nifti1Image(raw_data.astype(np.float32), affine)
         nib.save(img_nii, image_path)
 
-        # Save label
+        # Save multi-channel label (4D: num_classes x Z x Y x X)
         lbl_nii = nib.Nifti1Image(label_data.astype(np.uint8), affine)
         nib.save(lbl_nii, label_path)
 
+        n_annotated = len(annotated_classes)
+        n_total = len([c for c in class_names if c in CLASS_TO_ID])
         print(f"  [OK] Saved {crop_id}: image={raw_data.shape}, "
-              f"label classes={np.unique(label_data).tolist()}")
+              f"label=({num_classes}, {', '.join(str(s) for s in label_shape)}), "
+              f"annotated={n_annotated}/{n_total} classes: {annotated_classes}")
 
-        return image_path, label_path
+        return image_path, label_path, annotated_classes
 
     except Exception as e:
         print(f"  [ERROR] Failed to convert {crop_id}: {e}")
@@ -373,9 +428,15 @@ def create_datalist(
     output_dir: str,
     image_paths: dict[str, str],
     label_paths: dict[str, str],
+    annotated_classes_map: dict[str, list[str]],
 ) -> str:
     """
-    Create the datalist.json required by Auto3DSeg.
+    Create the datalist.json required by Auto3DSeg (sigmoid mode).
+
+    Each crop includes its list of annotated class indices so that
+    Auto3DSeg's LabelEmbedClassIndex transform only computes loss on
+    classes that have actual annotation data in that crop.
+
     Returns path to the datalist file.
     """
     training = []
@@ -396,13 +457,20 @@ def create_datalist(
         else:
             validation.append(item)
 
-    # If no explicit validation split, Auto3DSeg will do cross-validation
+    # Build class_names with index mapping for sigmoid mode
+    # Each class maps to its 0-indexed channel in the multi-channel label
+    class_names_cfg = [
+        {"name": name, "index": [idx]}
+        for idx, name in enumerate(BASE_CLASSES)
+    ]
+
     datalist = {
         "name": "CellMap FIB-SEM Segmentation Challenge",
-        "description": "3D FIB-SEM volumes with organelle annotations",
-        "modality": "EM",
+        "description": "3D FIB-SEM volumes with organelle annotations (sigmoid mode)",
+        "modality": "CT",  # MONAI only accepts CT/MRI; EM is grayscale like CT
+        "sigmoid": True,
         "num_classes": len(BASE_CLASSES),
-        "class_names": BASE_CLASSES,
+        "class_names": class_names_cfg,
         "training": training,
     }
 
@@ -413,9 +481,20 @@ def create_datalist(
     with open(datalist_path, "w") as f:
         json.dump(datalist, f, indent=2)
 
+    # Print annotation coverage summary
     print(f"\nDatalist saved to {datalist_path}")
-    print(f"  Training samples: {len(training)}")
+    print(f"  Training samples:   {len(training)}")
     print(f"  Validation samples: {len(validation)}")
+    print(f"  Mode: sigmoid (multi-channel binary labels)")
+    print(f"\n  Per-class annotation coverage:")
+    for cls_name in BASE_CLASSES:
+        n_annotated = sum(
+            1 for cid, classes in annotated_classes_map.items()
+            if cls_name in classes
+        )
+        n_total = len(annotated_classes_map)
+        pct = 100 * n_annotated / n_total if n_total > 0 else 0
+        print(f"    {cls_name:<12}: {n_annotated:>3}/{n_total} crops ({pct:5.1f}%)")
 
     return datalist_path
 
@@ -456,6 +535,12 @@ def main():
         default=None,
         help="Only convert specific datasets (e.g., jrc_cos7-1a jrc_hela-2)",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Number of parallel workers (0=auto based on CPU count, 1=sequential)",
+    )
 
     args = parser.parse_args()
 
@@ -490,29 +575,86 @@ def main():
 
     image_paths: dict[str, str] = {}
     label_paths: dict[str, str] = {}
+    annotated_classes_map: dict[str, list[str]] = {}
 
-    for i, entry in enumerate(entries):
-        crop_id = entry["crop_id"]
-        print(f"\n[{i+1}/{len(entries)}] Converting {crop_id} ({entry['split']})...")
+    # Determine worker count
+    num_workers = args.workers
+    if num_workers == 0:
+        import multiprocessing
+        # Use up to 64 workers (each worker is I/O + compression bound)
+        num_workers = min(64, multiprocessing.cpu_count())
 
-        result = convert_crop(
-            raw_zarr_path=entry["raw_path"],
-            raw_array_key=entry["raw_key"],
-            label_zarr_path=entry["label_path"],
-            label_array_key=entry["label_key"],
-            output_dir=args.output_dir,
-            crop_id=crop_id,
-            target_spacing=target_spacing,
-        )
+    if num_workers > 1 and len(entries) > 1:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
-        if result:
-            image_paths[crop_id] = result[0]
-            label_paths[crop_id] = result[1]
+        print(f"\nConverting {len(entries)} crops with {num_workers} parallel workers...")
+
+        # Build argument tuples for each crop
+        convert_args = [
+            (
+                entry["raw_path"],
+                entry["raw_key"],
+                entry["label_path"],
+                entry["label_key"],
+                args.output_dir,
+                entry["crop_id"],
+                target_spacing,
+            )
+            for entry in entries
+        ]
+
+        done = 0
+        failed = 0
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(convert_crop, *cargs): entries[i]["crop_id"]
+                for i, cargs in enumerate(convert_args)
+            }
+            for future in as_completed(futures):
+                crop_id = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        image_paths[crop_id] = result[0]
+                        label_paths[crop_id] = result[1]
+                        annotated_classes_map[crop_id] = result[2]
+                    else:
+                        failed += 1
+                except Exception as e:
+                    print(f"  [ERROR] {crop_id}: {e}")
+                    failed += 1
+                done += 1
+                if done % 25 == 0 or done == len(entries):
+                    print(f"  Progress: {done}/{len(entries)} "
+                          f"({failed} failed)")
+    else:
+        # Sequential fallback
+        for i, entry in enumerate(entries):
+            crop_id = entry["crop_id"]
+            print(f"\n[{i+1}/{len(entries)}] Converting {crop_id} "
+                  f"({entry['split']})...")
+
+            result = convert_crop(
+                raw_zarr_path=entry["raw_path"],
+                raw_array_key=entry["raw_key"],
+                label_zarr_path=entry["label_path"],
+                label_array_key=entry["label_key"],
+                output_dir=args.output_dir,
+                crop_id=crop_id,
+                target_spacing=target_spacing,
+            )
+
+            if result:
+                image_paths[crop_id] = result[0]
+                label_paths[crop_id] = result[1]
+                annotated_classes_map[crop_id] = result[2]
 
     # Create datalist.json
     print(f"\n{'='*60}")
     print("Creating Auto3DSeg datalist...")
-    datalist_path = create_datalist(entries, args.output_dir, image_paths, label_paths)
+    datalist_path = create_datalist(
+        entries, args.output_dir, image_paths, label_paths, annotated_classes_map
+    )
 
     # Summary
     print(f"\n{'='*60}")
@@ -520,9 +662,10 @@ def main():
     print(f"  NIfTI files: {args.output_dir}/")
     print(f"  Datalist: {datalist_path}")
     print(f"  Converted: {len(image_paths)}/{len(entries)} crops")
-    print(f"\nClass mapping:")
+    print(f"  Label format: multi-channel binary (sigmoid mode)")
+    print(f"\nChannel mapping (0-indexed):")
     for name, idx in CLASS_TO_ID.items():
-        print(f"  {idx:2d} = {name}")
+        print(f"  ch {idx-1:2d} = {name}")
     print(f"\nNext step: run Auto3DSeg analysis:")
     print(f"  python auto3dseg/run_auto3dseg.py --mode analyze \\")
     print(f"      --datalist {datalist_path}")
