@@ -309,9 +309,9 @@ def run_full_pipeline(
             gpu_customization=True,
             gpu_customization_specs={
                 "universal": {
-                    "num_trials": 3,
-                    "range_num_images_per_batch": [1, 4],
-                    "range_num_sw_batch_size": [1, 8],
+                    "num_trials": 5,
+                    "range_num_images_per_batch": [1, 8],
+                    "range_num_sw_batch_size": [1, 16],
                 },
             },
         )
