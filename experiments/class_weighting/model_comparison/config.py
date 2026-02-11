@@ -158,8 +158,8 @@ MODEL_REGISTRY = {
 # ============================================================
 
 TRAINING_CONFIG = {
-    'epochs': 100,
-    'iterations_per_epoch': 200,
+    'epochs': 150,
+    'iterations_per_epoch': 500,
     'validate_every': 1,
     'weight_decay': 1e-4,
     'betas': (0.9, 0.999),

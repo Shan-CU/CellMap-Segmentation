@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:a100:2
-#SBATCH --mem=200G
+#SBATCH --mem=320G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=logs/mc_resnet_%j.out
 #SBATCH --error=logs/mc_resnet_%j.err
