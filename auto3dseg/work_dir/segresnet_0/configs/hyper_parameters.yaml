@@ -1,0 +1,87 @@
+_meta_: {}
+bundle_root: auto3dseg/work_dir/segresnet_0
+ckpt_path: $@bundle_root + '/model'
+mlflow_tracking_uri: $@ckpt_path + '/mlruns/'
+mlflow_experiment_name: Auto3DSeg
+data_file_base_dir: /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
+data_list_file_path: /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/auto3dseg/nifti_data/datalist.json
+modality: ct
+fold: 0
+input_channels: 1
+output_classes: 14
+class_names: [ecs, pm, mito_mem, mito_lum, mito_ribo, golgi_mem, golgi_lum, ves_mem,
+  ves_lum, endo_mem, endo_lum, er_mem, er_lum, nuc]
+class_index:
+- [1]
+- [2]
+- [3]
+- [4]
+- [5]
+- [6]
+- [7]
+- [8]
+- [9]
+- [10]
+- [11]
+- [12]
+- [13]
+- [14]
+debug: false
+ckpt_save: true
+cache_rate: null
+roi_size: [224, 224, 144]
+auto_scale_allowed: true
+auto_scale_batch: true
+auto_scale_roi: false
+auto_scale_filters: false
+quick: false
+channels_last: true
+validate_final_original_res: true
+calc_val_loss: false
+amp: true
+log_output_file: null
+cache_class_indices: null
+early_stopping_fraction: 0.001
+determ: false
+orientation_ras: true
+crop_foreground: true
+learning_rate: 0.0002
+batch_size: 1
+num_images_per_batch: 1
+num_epochs: 300
+num_warmup_epochs: 3
+sigmoid: true
+resample: false
+resample_resolution: [8.0, 8.0, 8.0]
+crop_mode: ratio
+normalize_mode: range
+intensity_bounds: [10.170212765957446, 187.2127659574468]
+num_epochs_per_validation: 1
+num_epochs_per_saving: 1
+num_workers: 2
+num_steps_per_image: null
+num_crops_per_image: 1
+loss: {_target_: DiceCELoss, include_background: true, squared_pred: true, smooth_nr: 0,
+  smooth_dr: 1.0e-05, softmax: $not @sigmoid, sigmoid: $@sigmoid, to_onehot_y: $not
+    @sigmoid}
+optimizer: {_target_: torch.optim.AdamW, lr: '@learning_rate', weight_decay: 1.0e-05}
+network:
+  _target_: SegResNetDS
+  init_filters: 32
+  blocks_down: [1, 2, 2, 4, 4]
+  norm: INSTANCE_NVFUSER
+  in_channels: '@input_channels'
+  out_channels: '@output_classes'
+  dsdepth: 4
+finetune: {enabled: false, ckpt_name: $@bundle_root + '/model/model.pt'}
+validate: {enabled: false, ckpt_name: $@bundle_root + '/model/model.pt', output_path: $@bundle_root
+    + '/prediction_validation', save_mask: false, invert: true}
+infer: {enabled: false, ckpt_name: $@bundle_root + '/model/model.pt', output_path: $@bundle_root
+    + '/prediction_' + @infer#data_list_key, data_list_key: testing}
+anisotropic_scales: false
+spacing_median: [8.0, 8.0, 8.0]
+spacing_lower: [8.0, 8.0, 8.0]
+spacing_upper: [8.0, 8.0, 8.0]
+image_size_mm_median: [3200.0, 3200.0, 3200.0]
+image_size_mm_90: [4000.0, 4000.0, 4096.0]
+image_size: [500, 500, 512]

@@ -1,0 +1,94 @@
+_meta_: {}
+adapt_valid_mode: true
+adapt_valid_num_epochs_per_validation: [5, 5, 5]
+adapt_valid_progress_percentages: [10, 40, 70]
+amp: true
+auto_scale_allowed: true
+auto_scale_max_epochs: 1000
+bundle_root: auto3dseg/work_dir/swinunetr_0
+cache_rate: 0
+ckpt_path: $@bundle_root + '/model_fold' + str(@fold)
+class_names:
+- index: [1]
+  name: ecs
+- index: [2]
+  name: pm
+- index: [3]
+  name: mito_mem
+- index: [4]
+  name: mito_lum
+- index: [5]
+  name: mito_ribo
+- index: [6]
+  name: golgi_mem
+- index: [7]
+  name: golgi_lum
+- index: [8]
+  name: ves_mem
+- index: [9]
+  name: ves_lum
+- index: [10]
+  name: endo_mem
+- index: [11]
+  name: endo_lum
+- index: [12]
+  name: er_mem
+- index: [13]
+  name: er_lum
+- index: [14]
+  name: nuc
+data_file_base_dir: /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
+data_list_file_path: /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/auto3dseg/nifti_data/datalist.json
+early_stop_delta: 0
+early_stop_mode: true
+early_stop_patience: 5
+finetune: {activate: false, pretrained_ckpt_name: $@bundle_root + '/model_fold' +
+    str(@fold) + '/best_metric_model.pt'}
+fold: 0
+infer: {ckpt_name: $@bundle_root + '/model_fold' + str(@fold) + '/best_metric_model.pt',
+  data_list_key: testing, fast: false, log_output_file: $@bundle_root + '/model_fold'
+    + str(@fold) + '/inference.log', output_path: $@bundle_root + '/prediction_' +
+    @infer#data_list_key}
+input_channels: 1
+learning_rate: 0.0004
+log_output_file: $@bundle_root + '/model_fold' + str(@fold) + '/training.log'
+loss: {_target_: DiceCELoss, include_background: true, sigmoid: $not @softmax, smooth_dr: 1.0e-05,
+  smooth_nr: 0, softmax: $@softmax, squared_pred: true, to_onehot_y: $@softmax}
+lr_scheduler: {_target_: monai.optimizers.WarmupCosineSchedule, optimizer: $@optimizer,
+  t_total: $@num_epochs // @num_epochs_per_validation + 1, warmup_multiplier: 0.1,
+  warmup_steps: $@num_epochs//100}
+mlflow_experiment_name: Auto3DSeg
+mlflow_tracking_uri: $@bundle_root + '/model_fold' + str(@fold) + '/mlruns/'
+n_cases: 188
+num_cache_workers: 8
+num_crops_per_image: 2
+num_epochs: 1000
+num_epochs_per_validation: 5
+num_images_per_batch: 2
+num_patches_per_image: 2
+num_patches_per_iter: 1
+num_sw_batch_size: $@num_patches_per_iter
+num_workers: 2
+num_workers_validation: 2
+optimizer: {_target_: torch.optim.AdamW, lr: '@learning_rate', weight_decay: 1.0e-05}
+output_classes: 14
+overlap_ratio: 0.125
+overlap_ratio_final: 0.625
+patch_size: $@roi_size
+pretrained_path: $@bundle_root + '/pretrained_model' + '/swin_unetr.base_5000ep_f48_lr2e-4_pretrained.pt'
+random_seed: 0
+resample_resolution: [8.0, 8.0, 8.0]
+roi_size: [96, 96, 96]
+roi_size_valid: [96, 96, 96]
+show_cache_progress: false
+softmax: false
+sw_input_on_cpu: false
+train_cache_rate: $@cache_rate
+transforms: {lazy_resampling: false, resample_resolution: $@resample_resolution}
+use_pretrain: true
+valid_at_orig_resolution_at_last: true
+valid_at_orig_resolution_only: false
+validate: {ckpt_name: $@bundle_root + '/model_fold' + str(@fold) + '/best_metric_model.pt',
+  log_output_file: $@bundle_root + '/model_fold' + str(@fold) + '/validation.log',
+  output_path: $@bundle_root + '/prediction_fold' + str(@fold), save_mask: true}
+validate_cache_rate: $@cache_rate

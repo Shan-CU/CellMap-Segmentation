@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:nvidia_l40s:2
-#SBATCH --mem=512G
+#SBATCH --mem=350G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=logs/auto3dseg_train_%j.out
 #SBATCH --error=logs/auto3dseg_train_%j.err
@@ -31,8 +31,15 @@
 #   - target.float() cast for BCE compatibility
 #   - Sub-batch mask slicing for swinunetr/dints patch permutation
 #
-# Hardware: 2x L40S (48GB each), 16 CPUs, 512GB RAM
+# Hardware: 2x L40S (48GB each), 16 CPUs, 350GB RAM
 # Walltime: 11 days (maximum for l40-gpu partition)
+#
+# RAM note: Reduced num_workers from 8→2 in all algorithm configs
+# to keep peak RAM under 350G. With 2 workers × 2 prefetch × 2 DDP
+# ranks = 8 images in flight. Worst-case 8 largest training images
+# total ~228 GB after 15-channel label expansion in DiNTS/SwinUNETR.
+# Plus ~80G overhead = ~310G peak. 350G gives safe margin.
+# Previous attempts with 8 workers OOM'd at 512G (job 30343731).
 #
 # Uses --mode train which sets analyze=False, algo_gen=False,
 # train=True, ensemble=False — so patched bundles are preserved.
