@@ -1,9 +1,10 @@
 # Auto3DSeg: Pipeline Status & Agent Handoff Document
 
+
 > **Last Updated:** February 12, 2026  
 > **Branch:** `feature/auto3dseg-integration`  
 > **Project:** CellMap FIB-SEM Segmentation Challenge  
-> **Active Job:** `30276184` on Longleaf `l40-gpu` — PENDING (Priority)
+> **Active Job:** `30343731` on Longleaf `l40-gpu` node `g181005` — RUNNING
 
 ---
 
@@ -20,6 +21,7 @@
 9. [Training Configuration Comparison](#9-training-configuration-comparison)
 10. [Known Issues & Decisions](#10-known-issues--decisions)
 11. [Resource & Cluster Analysis](#11-resource--cluster-analysis)
+    - [11.3 L40S GPU Scaling Guide](#113-l40s-gpu-scaling-guide) ⭐ *Key reference for future training*
 12. [File Inventory — What Was Modified](#12-file-inventory)
 13. [Commands Reference](#13-commands-reference)
 14. [After Training Completes](#14-after-training-completes)
@@ -48,9 +50,12 @@ clearly visible in the EM image. This destroys model performance.
 **Current status:** All code is complete and verified. **57 problematic crops removed**
 (43 blank images from resolution mismatch + 10 more blank crops found by DataAnalyzer
 + 4 with empty annotations). Final dataset: **234 entries** (198 train, 36 val).
-DataAnalyzer re-run completed (Job `1654544`, 238 cases). Training job `30276184`
-is queued on Longleaf l40-gpu (2× L40S 48GB), waiting for resources. Once it starts,
-training should take 3–10 days for all 3 algorithms sequentially.
+DataAnalyzer re-run completed (Job `1654544`, 238 cases). Training job `30343731`
+is **RUNNING** on Longleaf l40-gpu node g181005 (2× L40S 48GB, 512GB RAM). DiNTS
+training started first. Previous job `30276184` was OOM-killed (200GB RAM insufficient
+for 14-channel label expansion); fixed by bumping to 512GB and correcting SegResNet's
+stale `num_epochs: 2` → `300`. See [Section 11.3](#113-l40s-gpu-scaling-guide) for
+the full L40S scaling guide derived from auto_scale analysis.
 
 ---
 
@@ -307,28 +312,31 @@ again, which regenerates all bundles from templates and **destroys all patches**
 
 | Field | Value |
 |-------|-------|
-| **Job ID** | `30276184` |
+| **Job ID** | `30343731` |
 | **Partition** | `l40-gpu` (Longleaf) |
-| **Status** | `PENDING` (Priority) — as of Feb 12 |
+| **Node** | `g181005` (L40S node, 1 TB system RAM) |
+| **Status** | `RUNNING` — as of Feb 12 13:37 |
 | **GPUs** | 2× NVIDIA L40S (48GB each) |
 | **CPUs** | 16 |
-| **RAM** | 200GB |
+| **RAM** | **512GB** (bumped from 200GB — see [Section 11.3](#113-l40s-gpu-scaling-guide)) |
 | **Walltime** | 11 days |
 | **Mode** | `--mode train` (analyze=False, algo_gen=False) |
-| **Algorithms** | SegResNet → SwinUNETR → DiNTS (sequential) |
+| **Algorithms** | DiNTS → SegResNet → SwinUNETR (sequential, DiNTS first) |
 | **Folds** | 1 (explicit train/val split) |
-| **Epochs** | Auto-computed: SegResNet 426, SwinUNETR 354, DiNTS 200 |
+| **Epochs** | Auto-scaled for L40S: DiNTS 41, SegResNet 300, SwinUNETR 1000 |
 | **Loss** | PartialAnnotationLossV2 (sigmoid Dice+BCE, masked) |
 | **Dataset** | 234 entries (198 train, 36 val) — after cleanup |
+| **Live RAM** | ~222 GB peak (of 512 GB limit) — verified stable |
+| **Live VRAM** | GPU 0: 43.2/46 GB, GPU 1: 43.3/46 GB — both ~93% utilized |
 
-### 7.2 What Will Happen When It Starts
+### 7.2 What Happens During Training
 
 1. AutoRunner instantiates with `analyze=False, algo_gen=False, train=True`
 2. `import_bundle_algo_history()` discovers 3 existing bundles
 3. `_train_algo_in_sequence()` runs each bundle's `train.py` as a subprocess
-4. **SegResNet** (~1-3 days): 426 epochs, 224³ patches, deep supervision
-5. **SwinUNETR** (~2-4 days): 354 epochs, 96³ patches, pretrained Swin weights
-6. **DiNTS** (~2-5 days): NAS search phase + 200 training epochs
+4. **DiNTS** (first): 41 epochs, 96³ patches, batch=13, NAS architecture search
+5. **SegResNet**: 300 epochs, 224³ patches, batch=1, deep supervision
+6. **SwinUNETR**: 1000 epochs, 96³ patches, batch=1, pretrained Swin weights
 7. Checkpoints saved to `<algo>/model_fold0/`
 
 **Estimated total: 3–10 days** (with early stopping, likely 3–5 days)
@@ -337,10 +345,10 @@ again, which regenerates all bundles from templates and **destroys all patches**
 
 ```bash
 # Check job status
-squeue -j 30276184
+squeue -j 30343731
 
 # Tail training log (once running)
-tail -f logs/auto3dseg_train_30276184.out
+tail -f logs/auto3dseg_train_30343731.out
 
 # Check for model checkpoints
 ls auto3dseg/work_dir/segresnet_0/model/
@@ -357,7 +365,8 @@ ls auto3dseg/work_dir/dints_0/model_fold0/
 | `30139932` | Feb 10 | `--mode full` + softmax + DiceCELoss | Wrong loss, would overwrite patches |
 | `30268488` | Feb 11 | ZeroDivisionError — no fold keys in datalist | Crashed in ~70s |
 | `30271306` | Feb 11 | 43+ blank crops in dataset, 4 empty annotations | Cancelled — data cleanup needed |
-| **`30276184`** | **Feb 11** | **Clean dataset (234 entries)** | **Current — PENDING** |
+| `30276184` | Feb 11 | **System RAM OOM** — 200GB limit, 14-ch label expansion in 8 workers × 2 DDP ranks ≈ 233GB | OOM-killed at 31s (23 oom_kill events) |
+| **`30343731`** | **Feb 12** | **Fixed: 512GB RAM, SegResNet num_epochs 2→300** | **RUNNING on g181005** |
 
 ---
 
@@ -421,8 +430,12 @@ Auto3DSeg auto-computed these configs. **Loss functions have been replaced** by
 |---------|-----------|-----------|-------|
 | **Architecture** | SegResNetDS (32 filters, 5 levels) | SwinUNETR (feature_size=48) | NAS-discovered |
 | **ROI / Patch** | 224 × 224 × 144 | 96 × 96 × 96 | 96 × 96 × 96 |
-| **Batch Size** | 1 | 2 | 2 |
-| **Epochs** | 426 | 354 | 200 (+ NAS) |
+| **batch_size (num_images_per_batch)** | 1 | 2 | 2 |
+| **num_patches_per_iter** | — (single patch) | 1 | 13 |
+| **num_crops_per_image** | 1 | 2 | 26 |
+| **Epochs** | 300 (manual fix) | 1000 (auto_scale) | 41 (auto_scale) |
+| **Effective training patches** | 300 × 188 × 1 = ~56K | 1000 × 188 × 2 = ~376K | 41 × 188 × 26 = ~200K |
+| **num_epochs_per_validation** | 1 | 5 | 2 (adaptive) |
 | **LR** | 0.0002 | 0.0004 | 0.2 |
 | **Optimizer** | AdamW | AdamW | SGD |
 | **Loss** | ~~DiceCE~~ → **PartialAnnotation** (deep supervision) | ~~DiceCE~~ → **PartialAnnotation** | ~~DiceFocal~~ → **PartialAnnotation** |
@@ -430,6 +443,8 @@ Auto3DSeg auto-computed these configs. **Loss functions have been replaced** by
 | **AMP** | ✅ | ✅ | ✅ |
 | **Pretrained** | No | Yes (Swin weights) | No |
 | **Early Stopping** | — | patience=5 | patience=20 |
+| **num_workers** | 4 | 8 | 8 |
+| **cache_rate** | null (disk) | 0 (disk) | 0 (disk) |
 
 ---
 
@@ -562,6 +577,216 @@ export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
 eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)"
 micromamba activate csc
 ```
+
+### 11.3 L40S GPU Scaling Guide
+
+> **Purpose:** This section documents everything we learned from MONAI Auto3DSeg's
+> auto_scale logic and the actual Job `30343731` resource profile. Use this to
+> configure **any** 3D segmentation training (MONAI or not) on Longleaf L40S nodes.
+
+#### 11.3.1 L40S Node Hardware (Longleaf `l40-gpu`)
+
+| Resource | Value | Notes |
+|----------|-------|-------|
+| **GPU** | NVIDIA L40S | Ada Lovelace architecture |
+| **VRAM per GPU** | 46,068 MiB (~45 GB usable) | `torch.cuda.get_device_properties().total_memory` |
+| **GPUs per node** | Up to 8 | We request 2 for DDP |
+| **System RAM per node** | ~1 TB (1,014,946 MB) | Confirmed via `free -g` on g181005 |
+| **Max walltime** | 11 days | `l40-gpu` partition limit |
+| **Interconnect** | PCIe P2P/CUMEM between GPUs | NCCL uses direct GPU memory access, no NVLink |
+
+#### 11.3.2 The Two Memory Bottlenecks
+
+**Bottleneck 1: GPU VRAM (45 GB)** — determines batch size and patch size.
+
+The fundamental tradeoff is **large patches vs. large batches**:
+
+| Approach | Patch (ROI) Size | VRAM per Patch | Fits in 45 GB | Batch Size |
+|----------|-------------------|----------------|---------------|------------|
+| Large ROI (SegResNet-style) | 224 × 224 × 144 = 7.2M voxels | ~43 GB (with 15-ch output + gradients) | Barely (1 patch) | **1** |
+| Small ROI (DiNTS/SwinUNETR) | 96 × 96 × 96 = 884K voxels | ~3-4 GB per patch | Comfortably | **1–13** |
+
+**Rule of thumb for 15 output classes on L40S:**
+- 96³ patches: batch ≈ 13 (DiNTS) or 1 (SwinUNETR, heavier model)
+- 128³ patches: batch ≈ 4–6
+- 224³ patches: batch = 1 (tight fit)
+
+**Bottleneck 2: System RAM (~1 TB, SLURM-limited)** — determines DataLoader workers.
+
+The system RAM bottleneck is **not** GPU-related. It comes from the DataLoader
+worker processes loading and transforming data in CPU memory:
+
+```
+RAM ≈ num_workers × prefetch_factor × images_in_flight × (image_bytes + label_bytes)
+```
+
+For our dataset (15 output classes, mean image ~393×398×416 voxels):
+- Each image: ~65 MB (uint8)
+- Each label after `LabelEmbedClassIndex` expansion: 14 binary channels × 65 MB = **~910 MB per label**
+- With large crops: up to 3.4 GB per label (crop247 was 1796×1500×2400 before removal)
+
+**Observed Job `30343731` memory profile:**
+
+| Component | RAM Usage |
+|-----------|-----------|
+| DDP Rank 0 (main process) | ~109 GB |
+| DDP Rank 1 (main process) | ~70 GB |
+| Rank 0 child worker | ~43 GB |
+| 8 DataLoader workers (per rank) | ~1.5–7.5 GB each |
+| **Total observed** | **~222 GB** |
+| **SLURM limit** | **512 GB** |
+| **Headroom** | **~290 GB** |
+
+> ⚠️ **Critical lesson (Job `30276184` OOM):** With `--mem=200G`, the job was
+> OOM-killed after 31 seconds (23 `oom_kill` events in kernel logs). The 14-channel
+> label expansion in DataLoader workers × 8 workers × 2 prefetch × 2 DDP ranks
+> exceeded 200 GB. **Always request `--mem=512G` on L40S nodes for multi-class
+> segmentation.** The nodes have 1 TB, so 512 GB is safe.
+
+#### 11.3.3 How MONAI Auto3DSeg Computes Scaling
+
+Each algorithm has its own auto_scale logic. All three detect GPU memory at
+runtime via `torch.cuda.get_device_properties()` or `torch.cuda.mem_get_info()`.
+
+**DiNTS** (`dints_0/scripts/train.py: pre_operation()`):
+```python
+mem = get_mem_from_visible_gpus()  # returns free VRAM in bytes
+mem = float(min(mem)) / (1024**3)  # convert to GB
+mem = max(1.0, mem - 1.0)          # reserve 1 GB headroom → ~44 GB on L40S
+
+# Heuristic: linear interpolation between 2 reference points
+mem_bs2 = 6.0 + 14.0 * (output_classes - 2) / 103   # 7.77 GB for batch=2
+mem_bs9 = 24.0 + 50.0 * (output_classes - 2) / 103   # 30.31 GB for batch=9
+batch_size = 2 + 7 * (mem - mem_bs2) / (mem_bs9 - mem_bs2)  # → 13 on L40S
+
+# Epoch calculation: 400 base × data_factor / batch_size
+_factor = (1251/n_cases) × (mean_shape / [240,240,155]) × (96/roi)³ / epoch_divided_factor
+num_epochs = int(400 * _factor / batch_size)  # → 41 epochs
+```
+
+**SwinUNETR** (`swinunetr_0/scripts/algo.py: auto_scale()`):
+```python
+# Same base formula but 2× memory thresholds (SwinUNETR is heavier)
+mem_bs2 = (12/6) * base_mem_bs2   # 15.54 GB for batch=2
+mem_bs9 = (12/6) * base_mem_bs9   # 60.62 GB for batch=9
+batch_size = max(1, int(2 + 7 * (mem - mem_bs2) / (mem_bs9 - mem_bs2)))  # → 1 on L40S
+
+# Epochs: target 800K total patch iterations
+num_epochs = min(max_epoch, int(800000 / n_cases / num_crops_per_image))  # → 1000
+```
+
+**SegResNet** (`segresnet_0/scripts/utils.py: auto_adjust_network_settings()`):
+```python
+gpu_mem = torch.cuda.get_device_properties(i).total_memory / 1024**3  # ~45 GB
+gpu_factor = max(1, gpu_mem / 16)  # → 2.8 (ratio vs 16GB baseline)
+
+# Tries to scale ROI, filters, or batch — but ROI is already large:
+# roi_size=[224,224,144] → 7.2M voxels > base_numel * gpu_factor → batch stays 1
+# NOTE: SegResNet does NOT auto-compute num_epochs. It reads from YAML directly.
+```
+
+#### 11.3.4 What Auto3DSeg Computed for L40S (Actual Values)
+
+| Parameter | DiNTS | SwinUNETR | SegResNet |
+|-----------|-------|-----------|----------|
+| **GPU mem detected** | ~44 GB usable | ~44 GB usable | ~45 GB total |
+| **roi_size** | [96, 96, 96] | [96, 96, 96] | [224, 224, 144] |
+| **num_patches_per_iter** | 13 | 1 | — |
+| **num_crops_per_image** | 26 | 2 | 1 |
+| **num_images_per_batch** | 2 | 2 | 1 |
+| **num_epochs** | 41 | 1000 | 300 (manual) |
+| **Total training patches** | ~200K | ~376K | ~56K |
+| **cache_rate** | 0 (no caching) | 0 (no caching) | null (no caching) |
+| **num_workers** | 8 | 8 | 4 |
+| **VRAM used (observed)** | 43.2 + 43.3 GB | — (not yet run) | — (not yet run) |
+
+#### 11.3.5 Practical Guide: Configuring Your Own Training on L40S
+
+For **non-MONAI** training (e.g., PyTorch Lightning, custom loops), use these
+empirically validated settings as starting points:
+
+**SLURM resource request:**
+```bash
+#SBATCH --partition=l40-gpu
+#SBATCH --gres=gpu:2              # 2× L40S (48GB each)
+#SBATCH --mem=512G                # MUST be ≥512G for multi-class 3D segmentation
+#SBATCH --cpus-per-task=16
+#SBATCH --time=11-00:00:00        # max walltime
+```
+
+**Batch size selection (15 output classes, sigmoid mode):**
+
+| Patch Size | Model ~Size | Suggested batch_size (per GPU) | VRAM Usage |
+|------------|-------------|-------------------------------|------------|
+| 96³ | Small (UNet, DiNTS) | 8–13 | ~40–44 GB |
+| 96³ | Medium (SwinUNETR) | 1–2 | ~40–44 GB |
+| 128³ | Small/Medium | 2–4 | ~40–44 GB |
+| 160³ | Small | 1–2 | ~40–44 GB |
+| 224³ | SegResNet (32 filters) | 1 | ~43 GB |
+| 224³ | Larger models | ❌ Won't fit | >45 GB |
+
+**DataLoader configuration:**
+```python
+DataLoader(
+    dataset,
+    batch_size=2,              # images per batch (crops extracted from each)
+    num_workers=8,             # 8 per DDP rank → 16 total with 2 GPUs
+    prefetch_factor=2,         # default; increase only if IO-bound
+    pin_memory=True,
+    persistent_workers=True,   # avoid re-forking overhead
+)
+```
+
+**DDP configuration:**
+```python
+# torchrun handles this, but for reference:
+torchrun --nnodes=1 --nproc_per_node=2 train.py
+# NCCL uses P2P/CUMEM on L40S (no NVLink) — all-reduce is fast for 2 GPUs
+```
+
+**System RAM budget formula:**
+```
+Peak RAM ≈ 2 × (model_size + optimizer_states)           # per DDP rank
+         + num_workers_total × prefetch × crop_size_bytes  # DataLoader
+         + label_expansion_factor × above                  # multi-class labels
+
+For this dataset:
+  ≈ 2 × 2 GB (model)                    = ~4 GB
+  + 16 workers × 2 prefetch × 65 MB     = ~2 GB (images)
+  + 16 workers × 2 prefetch × 910 MB    = ~29 GB (14-ch labels)
+  + main process data buffers            = ~150-180 GB
+  ≈ 200–250 GB total
+  → Request 512 GB (2× headroom for spikes during validation)
+```
+
+**Key gotchas:**
+1. **MONAI auto_scale only optimizes GPU VRAM.** It has zero awareness of system
+   RAM. You must set `--mem` in SLURM independently.
+2. **SegResNet does NOT auto-compute `num_epochs`.** It reads directly from
+   `hyper_parameters.yaml`. If a smoke test wrote `num_epochs: 2` via
+   `config_save_updated()`, that stale value persists. DiNTS and SwinUNETR
+   recompute epochs in `pre_operation()` every time.
+3. **`cache_rate=0` is correct for large datasets.** Caching 234 images × 65 MB =
+   ~15 GB is feasible, but labels expand to 14 channels → ~210 GB cached labels.
+   Not worth it when L40S nodes have fast NVMe storage.
+4. **TF32 is enabled** via `NVIDIA_TF32_OVERRIDE=1` in the container. This uses
+   TensorFloat-32 for matmul/convolutions — ~2× speedup with minimal precision
+   loss. Keep it on for training.
+5. **Mixed precision (AMP) is essential.** All 3 algorithms use `amp=True`.
+   On L40S, AMP roughly halves VRAM for activations, enabling larger batches.
+
+#### 11.3.6 Quick Reference: L40S vs Other GPUs
+
+| GPU | VRAM | batch @ 96³ (15-class) | batch @ 224³ | System RAM Needed |
+|-----|------|----------------------|--------------|------------------|
+| V100 (16GB) | 16 GB | 1–2 | ❌ | 128G |
+| A100 (40GB) | 40 GB | 8–10 | 1 (tight) | 256–512G |
+| **L40S (48GB)** | **45 GB** | **8–13** | **1** | **512G** |
+| H100 (80GB) | 80 GB | 20–25 | 2–3 | 512G |
+
+> **A100 note:** Longleaf `a100-gpu` has 40GB PCIe A100s (not 80GB SXM). VRAM is
+> ~12% less than L40S, and max walltime is 6 days (vs 11 for l40-gpu). Use L40S
+> unless A100s are significantly less congested.
 
 ---
 
