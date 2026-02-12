@@ -175,12 +175,17 @@ cython_debug/
 tensorboard/
 experiments/loss_optimization/runs/
 experiments/loss_optimization/checkpoints/
-experiments/loss_optimization/results/
 *.err
 *.out
 *.zip
 *.json
 .nfs*
+
+# Allow experiment results and logs to be tracked
+!experiments/loss_optimization/results/
+!experiments/loss_optimization/results/*.json
+!experiments/loss_optimization/logs_parallel_*/
+!experiments/loss_optimization/logs_parallel_*/*.log
 
 # visual studio code configuration
 .vscode
