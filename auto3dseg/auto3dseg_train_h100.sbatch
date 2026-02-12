@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:h100:4
+#SBATCH --gres=gpu:h100:2
 #SBATCH --mem=200G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=logs/auto3dseg_train_%j.out
@@ -15,19 +15,16 @@
 #SBATCH --mail-user=gsgeorge@unc.edu
 
 # ============================================================
-# Auto3DSeg Training — Sycamore H100 MN (4x NVIDIA H100 80GB)
+# Auto3DSeg Training — Sycamore H100 MN (2x NVIDIA H100 80GB)
 #
-# Runs the complete MONAI Auto3DSeg pipeline:
-#   1. Data analysis (if not already cached)
-#   2. Algorithm bundle generation (SegResNet, SwinUNETR, DiNTS)
-#   3. Model training
-#   4. Model ensemble for best predictions
+# TRAIN-ONLY mode: skips analyze & bundle-gen to preserve
+# hand-patched bundles with PartialAnnotationLossV2.
 #
-# Hardware: 4x H100 (80GB each), 16 CPUs, 200GB RAM
+# Hardware: 2x H100 (80GB each), 16 CPUs, 200GB RAM
 # Walltime: 5 days (max for h100_mn partition)
 #
-# The pipeline caches intermediate results, so it can be safely
-# restarted if it times out — it will resume from where it left off.
+# Algorithms run sequentially: SegResNet → SwinUNETR → DiNTS
+# Checkpoints saved per-algorithm, safe to restart.
 # ============================================================
 
 echo "Job ID: $SLURM_JOB_ID"
@@ -61,7 +58,7 @@ mkdir -p logs auto3dseg/work_dir
 # --- Performance tuning ---
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:False,max_split_size_mb:512,garbage_collection_threshold:0.9"
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.9"
 export CUDA_LAUNCH_BLOCKING=0
 export CUDA_MODULE_LOADING=LAZY
 export NCCL_DEBUG=INFO
@@ -96,9 +93,9 @@ echo "  Epochs:     $NUM_EPOCHS (0 = use auto-computed per algorithm)"
 echo "  GPUs:       $N_GPUS"
 echo ""
 
-# --- Run pipeline ---
+# --- Run pipeline (TRAIN ONLY — preserves patched bundles) ---
 CMD="python auto3dseg/run_auto3dseg.py \
-    --mode full \
+    --mode train \
     --datalist $DATALIST \
     --work_dir auto3dseg/work_dir \
     --algos $ALGOS \
@@ -112,10 +109,10 @@ echo "Running: $CMD"
 eval $CMD
 
 echo ""
-echo "Auto3DSeg pipeline finished at $(date)"
+echo "Auto3DSeg training finished at $(date)"
 echo "Results in: auto3dseg/work_dir/"
 echo ""
 echo "Key outputs to review:"
-echo "  auto3dseg/work_dir/datastats.yaml    - Dataset statistics"
-echo "  auto3dseg/work_dir/<algo>_<fold>/     - Trained model bundles"
-echo "  auto3dseg/work_dir/ensemble_output/   - Ensemble predictions"
+echo "  auto3dseg/work_dir/segresnet_0/model/   - SegResNet checkpoints"
+echo "  auto3dseg/work_dir/swinunetr_0/model_fold0/ - SwinUNETR checkpoints"
+echo "  auto3dseg/work_dir/dints_0/model_fold0/     - DiNTS checkpoints"

@@ -1,0 +1,1717 @@
+{
+  "name": "CellMap FIB-SEM Segmentation Challenge",
+  "description": "3D FIB-SEM volumes with single-channel integer labels and partial annotation masking",
+  "modality": "CT",
+  "sigmoid": true,
+  "num_classes": 14,
+  "class_names": [
+    {
+      "name": "ecs",
+      "index": [
+        1
+      ]
+    },
+    {
+      "name": "pm",
+      "index": [
+        2
+      ]
+    },
+    {
+      "name": "mito_mem",
+      "index": [
+        3
+      ]
+    },
+    {
+      "name": "mito_lum",
+      "index": [
+        4
+      ]
+    },
+    {
+      "name": "mito_ribo",
+      "index": [
+        5
+      ]
+    },
+    {
+      "name": "golgi_mem",
+      "index": [
+        6
+      ]
+    },
+    {
+      "name": "golgi_lum",
+      "index": [
+        7
+      ]
+    },
+    {
+      "name": "ves_mem",
+      "index": [
+        8
+      ]
+    },
+    {
+      "name": "ves_lum",
+      "index": [
+        9
+      ]
+    },
+    {
+      "name": "endo_mem",
+      "index": [
+        10
+      ]
+    },
+    {
+      "name": "endo_lum",
+      "index": [
+        11
+      ]
+    },
+    {
+      "name": "er_mem",
+      "index": [
+        12
+      ]
+    },
+    {
+      "name": "er_lum",
+      "index": [
+        13
+      ]
+    },
+    {
+      "name": "nuc",
+      "index": [
+        14
+      ]
+    }
+  ],
+  "training": [
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop234_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop234.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop236_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop236.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop237_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop237.nii.gz",
+      "annotated_classes": "0,1,2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop239_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop239.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop243_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop243.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop248_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop248.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop254_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop254.nii.gz",
+      "annotated_classes": "2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop256_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop256.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop292_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop292.nii.gz",
+      "annotated_classes": "2,3,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop240_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop240.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop241_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop241.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop242_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop242.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop245_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop245.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop249_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop249.nii.gz",
+      "annotated_classes": "1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop255_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop255.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop258_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop258.nii.gz",
+      "annotated_classes": "0,1,2,3,4,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop259_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop259.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop291_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop291.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop116_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop116.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop118_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop118.nii.gz",
+      "annotated_classes": "0,1,2,3,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop119_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop119.nii.gz",
+      "annotated_classes": "0,1,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop130_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop130.nii.gz",
+      "annotated_classes": "2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop120_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop120.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop121_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop121.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop122_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop122.nii.gz",
+      "annotated_classes": "0,1,5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop123_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop123.nii.gz",
+      "annotated_classes": "5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop178_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop178.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-vnc-1_crop78_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-vnc-1_crop78.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-vnc-1_crop79_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-vnc-1_crop79.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-vnc-1_crop173_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-vnc-1_crop173.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-vnc-1_crop176_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-vnc-1_crop176.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-vnc-1_crop185_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-vnc-1_crop185.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop3_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop3.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop4_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop4.nii.gz",
+      "annotated_classes": "5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop7_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop7.nii.gz",
+      "annotated_classes": "0,1,7,8",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop9_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop9.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop13_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop13.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop15_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop15.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop16_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop16.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop18_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop18.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop19_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop19.nii.gz",
+      "annotated_classes": "7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop23_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop23.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop28_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop28.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop54_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop54.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop55_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop55.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop56_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop56.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop57_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop57.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop58_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop58.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop59_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop59.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop94_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop94.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop95_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop95.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop96_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop96.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop113_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop113.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop33_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop33.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop50_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop50.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop51_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop51.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop60_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop60.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop62_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop62.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop63_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop63.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop64_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop64.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop65_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop65.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop86_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop86.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop101_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop101.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop111_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop111.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop181_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop181.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop35_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop35.nii.gz",
+      "annotated_classes": "5,6,7,8",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop36_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop36.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop37_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop37.nii.gz",
+      "annotated_classes": "2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop38_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop38.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop43_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop43.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop66_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop66.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop67_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop67.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop68_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop68.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop69_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop69.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop70_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop70.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop71_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop71.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop91_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop91.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop107_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop107.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop112_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop112.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop126_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop126.nii.gz",
+      "annotated_classes": "0,1,2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop182_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop182.nii.gz",
+      "annotated_classes": "0,1,2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop31_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop31.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop32_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop32.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop39_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop39.nii.gz",
+      "annotated_classes": "2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop40_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop40.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop42_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop42.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop48_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop48.nii.gz",
+      "annotated_classes": "2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop49_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop49.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop73_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop73.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop74_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop74.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop75_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop75.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop76_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop76.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop77_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop77.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop88_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop88.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop89_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop89.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop90_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop90.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop110_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop110.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop129_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop129.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop140_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop140.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop141_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop141.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop146_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop146.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop147_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop147.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop149_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop149.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop156_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop156.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop158_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop158.nii.gz",
+      "annotated_classes": "2,3,4,5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop159_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop159.nii.gz",
+      "annotated_classes": "7,8,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop161_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop161.nii.gz",
+      "annotated_classes": "0,1,2,3,4,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop162_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop162.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop163_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop163.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop165_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop165.nii.gz",
+      "annotated_classes": "0,1,2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop166_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop166.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop124_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop124.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop125_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop125.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop131_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop131.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop132_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop132.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop133_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop133.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop135_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop135.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop136_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop136.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop137_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop137.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop138_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop138.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop139_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop139.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop143_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop143.nii.gz",
+      "annotated_classes": "2,3,4,5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop144_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop144.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop150_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop150.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop151_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop151.nii.gz",
+      "annotated_classes": "5,6,7,8,9,10",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop157_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop157.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop172_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop172.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop175_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop175.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop183_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop183.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop416_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop416.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop417_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop417.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop266_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop266.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop267_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop267.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop268_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop268.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop269_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop269.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop270_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop270.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop272_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop272.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop274_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop274.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop275_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop275.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop276_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop276.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop278_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop278.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop279_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop279.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop298_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop298.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop313_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop313.nii.gz",
+      "annotated_classes": "2,3,4,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop319_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop319.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop320_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop320.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop321_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop321.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop322_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop322.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop325_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop325.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop377_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop377.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop333_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop333.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop340_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop340.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop341_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop341.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop342_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop342.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop368_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop368.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop369_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop369.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop376_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop376.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-nacc-1_crop115_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-nacc-1_crop115.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop20_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop20.nii.gz",
+      "annotated_classes": "2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop22_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop22.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop25_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop25.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop26_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop26.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop80_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop80.nii.gz",
+      "annotated_classes": "2,3,5,6,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop81_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop81.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop82_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop82.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop83_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop83.nii.gz",
+      "annotated_classes": "0",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop97_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop97.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop98_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop98.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop99_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop99.nii.gz",
+      "annotated_classes": "13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop188_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop188.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop201_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop201.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop202_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop202.nii.gz",
+      "annotated_classes": "0,1,2,3,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop203_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop203.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop206_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop206.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop208_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop208.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop209_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop209.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop210_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop210.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop212_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop212.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop213_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop213.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop216_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop216.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop217_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop217.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop218_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop218.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop219_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop219.nii.gz",
+      "annotated_classes": "0,1,2,3,5,6,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop191_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop191.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop192_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop192.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop193_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop193.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop195_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop195.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop198_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop198.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop199_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop199.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop200_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop200.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop214_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop214.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop220_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop220.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop222_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop222.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop224_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop224.nii.gz",
+      "annotated_classes": "0,1,9,10",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop225_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop225.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop226_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop226.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop227_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop227.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop228_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop228.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 1
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop252_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop252.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop235_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop235.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop117_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop117.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop134_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop134.nii.gz",
+      "annotated_classes": "5,6,7,8,9,10",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop1_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop1.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop6_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop6.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop8_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop8.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop14_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop14.nii.gz",
+      "annotated_classes": "7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop155_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop155.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop61_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop61.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop85_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop85.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop87_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop87.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop47_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop47.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop92_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop92.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop93_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop93.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop180_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop180.nii.gz",
+      "annotated_classes": "0,1,2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop72_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop72.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop109_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop109.nii.gz",
+      "annotated_classes": "0,1,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop148_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop148.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop160_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop160.nii.gz",
+      "annotated_classes": "0,1,2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop164_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop164.nii.gz",
+      "annotated_classes": "0,1,2,3,4,5,6,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop142_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop142.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop145_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop145.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop171_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop171.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop273_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop273.nii.gz",
+      "annotated_classes": "2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop277_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop277.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop280_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop280.nii.gz",
+      "annotated_classes": "7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop323_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop323.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop326_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop326.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop370_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop370.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop84_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop84.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop187_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop187.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop189_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop189.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop211_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop211.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop190_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop190.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop196_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop196.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 0
+    }
+  ],
+  "validation": [
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1a_crop252_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1a_crop252.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_cos7-1b_crop235_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_cos7-1b_crop235.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ctl-id8-1_crop117_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ctl-id8-1_crop117.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_fly-mb-1a_crop134_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_fly-mb-1a_crop134.nii.gz",
+      "annotated_classes": "5,6,7,8,9,10",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop1_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop1.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop6_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop6.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop8_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop8.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop14_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop14.nii.gz",
+      "annotated_classes": "7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-2_crop155_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-2_crop155.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop61_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop61.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop85_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop85.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_hela-3_crop87_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_hela-3_crop87.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop47_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop47.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop92_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop92.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop93_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop93.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_jurkat-1_crop180_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_jurkat-1_crop180.nii.gz",
+      "annotated_classes": "0,1,2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop72_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop72.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_macrophage-2_crop109_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_macrophage-2_crop109.nii.gz",
+      "annotated_classes": "0,1,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop148_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop148.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop160_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop160.nii.gz",
+      "annotated_classes": "0,1,2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-kidney_crop164_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-kidney_crop164.nii.gz",
+      "annotated_classes": "0,1,2,3,4,5,6,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop142_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop142.nii.gz",
+      "annotated_classes": "7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop145_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop145.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver_crop171_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver_crop171.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop273_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop273.nii.gz",
+      "annotated_classes": "2,3,4,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop277_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop277.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop280_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop280.nii.gz",
+      "annotated_classes": "7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop323_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop323.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-1_crop326_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-1_crop326.nii.gz",
+      "annotated_classes": "2,3,4,7,8,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_mus-liver-zon-2_crop370_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_mus-liver-zon-2_crop370.nii.gz",
+      "annotated_classes": "2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-1_crop84_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-1_crop84.nii.gz",
+      "annotated_classes": "0",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop187_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop187.nii.gz",
+      "annotated_classes": "0,1,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop189_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop189.nii.gz",
+      "annotated_classes": "0,1,2,3,7,8,9,10,11,12,13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_sum159-4_crop211_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_sum159-4_crop211.nii.gz",
+      "annotated_classes": "13",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop190_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop190.nii.gz",
+      "annotated_classes": "0,1,2,3,4,7,8,9,10,11,12",
+      "fold": 0
+    },
+    {
+      "image": "auto3dseg/nifti_data/images/jrc_ut21-1413-003_crop196_0000.nii.gz",
+      "label": "auto3dseg/nifti_data/labels/jrc_ut21-1413-003_crop196.nii.gz",
+      "annotated_classes": "2,3,7,8,9,10,11,12",
+      "fold": 0
+    }
+  ]
+}

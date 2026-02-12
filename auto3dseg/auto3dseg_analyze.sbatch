@@ -5,8 +5,8 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=48
-#SBATCH --mem=256G
+#SBATCH --cpus-per-task=96
+#SBATCH --mem=512G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/auto3dseg_analyze_%j.out
 #SBATCH --error=logs/auto3dseg_analyze_%j.err
@@ -47,8 +47,8 @@ echo "Python: $(which python)"
 python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 python -c "import monai; print(f'MONAI {monai.__version__}')"
 
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
 
 mkdir -p logs auto3dseg/work_dir
 
@@ -69,7 +69,7 @@ python auto3dseg/run_auto3dseg.py \
     --datalist "$DATALIST" \
     --work_dir auto3dseg/work_dir \
     --device cpu \
-    --workers 4
+    --workers 16
 
 echo ""
 echo "Analysis complete at $(date)"

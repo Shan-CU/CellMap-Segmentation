@@ -194,4 +194,7 @@ result_submitted_only.json
 # Bash tasks
 nohup.out
 auto3dseg/nifti_data/
+!auto3dseg/nifti_data/datalist.json
 auto3dseg/work_dir/
+!auto3dseg/work_dir/datastats.yaml
+!auto3dseg/work_dir/datastats_by_case.yaml

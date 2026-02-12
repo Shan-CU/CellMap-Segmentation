@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Run MONAI Auto3DSeg on CellMap FIB-SEM segmentation data.
 
-This script provides three modes:
+This script provides four modes:
   1. analyze  - Run only the DataAnalyzer to get dataset statistics
   2. generate - Run DataAnalyzer + BundleGen to create algorithm bundles
-  3. full     - Run the complete Auto3DSeg pipeline (analyze → generate → train → ensemble)
+  3. train    - Train only (skip analyze/generate, keep patched bundles intact)
+  4. full     - Run the complete Auto3DSeg pipeline (analyze → generate → train → ensemble)
 
 The output includes:
   - datastats.yaml: Dataset statistics report
@@ -19,6 +21,10 @@ Usage:
 
     # Generate algorithm bundles without training
     python run_auto3dseg.py --mode generate --datalist ./nifti_data/datalist.json
+
+    # Train only — uses existing patched bundles (no re-analyze / re-generate)
+    python run_auto3dseg.py --mode train --datalist ./nifti_data/datalist.json \
+        --algos segresnet swinunetr dints
 
     # Full pipeline (multi-day, multi-GPU recommended)
     python run_auto3dseg.py --mode full --datalist ./nifti_data/datalist.json \
@@ -173,6 +179,9 @@ def run_bundle_generation(
     - Training configs optimized for the dataset
     - Network architecture configs
     - Training/inference scripts
+
+    Note: Requires a GPU node — template auto_scale functions call
+    torch.cuda.get_device_properties() which needs actual CUDA.
     """
     from monai.apps.auto3dseg import BundleGen
 
@@ -195,7 +204,10 @@ def run_bundle_generation(
         "dataroot": os.path.abspath(dataroot) if dataroot else "",
     }
 
-    # Add class_names if available
+    # Pass sigmoid mode and class_names from datalist
+    # This enables per-class binary prediction (handles partial annotations)
+    if "sigmoid" in dl:
+        data_src["sigmoid"] = dl["sigmoid"]
     if "class_names" in dl:
         data_src["class_names"] = dl["class_names"]
 
@@ -262,6 +274,10 @@ def run_full_pipeline(
         "dataroot": os.path.abspath(dataroot) if dataroot else "",
     }
 
+    # Pass sigmoid mode and class_names from datalist
+    # This enables per-class binary prediction (handles partial annotations)
+    if "sigmoid" in dl:
+        input_cfg["sigmoid"] = dl["sigmoid"]
     if "class_names" in dl:
         input_cfg["class_names"] = dl["class_names"]
 
@@ -310,7 +326,7 @@ def run_full_pipeline(
 
         gpu_mem_gb = 0
         if torch.cuda.is_available():
-            gpu_mem_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         print(f"  GPU memory detected: {gpu_mem_gb:.0f} GB")
 
         if gpu_mem_gb >= 70:  # H100 (80GB) or similar
@@ -364,6 +380,103 @@ def run_full_pipeline(
         print("  - ensemble_output/: Ensemble predictions")
 
 
+def run_train_only(
+    datalist: str,
+    dataroot: str,
+    work_dir: str,
+    algos: list[str] | None = None,
+    num_fold: int = 5,
+    num_epochs: int = 0,
+    num_gpus: int = 1,
+    train_params: dict | None = None,
+):
+    """
+    Train-only mode: skip DataAnalyzer and BundleGen, go straight to training.
+
+    This is the recommended mode when algorithm bundles have already been
+    generated and manually patched (e.g. with partial-annotation loss,
+    CropForegroundd removal, etc.).  Setting analyze=False and algo_gen=False
+    guarantees AutoRunner will NOT overwrite the patched bundles.
+
+    The AutoRunner will:
+      - import_bundle_algo_history() to discover existing bundles in work_dir
+      - call _train_algo_in_sequence() which runs each bundle's train.py
+      - save checkpoints, progress.yaml, and best_metric per algorithm
+    """
+    from monai.apps.auto3dseg import AutoRunner
+
+    print("\n" + "=" * 70)
+    print("MONAI Auto3DSeg - Train Only (patched bundles)")
+    print("=" * 70)
+
+    # Build input config (AutoRunner still needs it for data source info)
+    with open(datalist, "r") as f:
+        dl = json.load(f)
+
+    input_cfg = {
+        "modality": "CT",
+        "datalist": os.path.abspath(datalist),
+        "dataroot": os.path.abspath(dataroot) if dataroot else "",
+    }
+    if "sigmoid" in dl:
+        input_cfg["sigmoid"] = dl["sigmoid"]
+    if "class_names" in dl:
+        input_cfg["class_names"] = dl["class_names"]
+
+    input_cfg_path = os.path.join(work_dir, "input.yaml")
+    os.makedirs(work_dir, exist_ok=True)
+    with open(input_cfg_path, "w") as f:
+        yaml.dump(input_cfg, f)
+
+    # ---- Key: explicit flags to skip analyze & bundle generation ----
+    runner = AutoRunner(
+        work_dir=work_dir,
+        input=input_cfg_path,
+        algos=algos,
+        analyze=False,       # already done — do NOT re-analyze
+        algo_gen=False,      # already done — do NOT re-generate (would overwrite patches)
+        train=True,          # always train, even if cache says it was done before
+        ensemble=False,      # ensemble later once training succeeds
+    )
+
+    runner.set_num_fold(num_fold)
+
+    # Training parameters
+    tp = {
+        "num_epochs_per_validation": 5,
+        "num_images_per_batch": 2,
+        "num_warmup_epochs": 5,
+    }
+    if num_epochs > 0:
+        tp["num_epochs"] = num_epochs
+    if train_params:
+        tp.update(train_params)
+    runner.set_training_params(params=tp)
+
+    # Multi-GPU
+    if num_gpus > 1:
+        gpu_ids = ",".join(str(i) for i in range(num_gpus))
+        runner.set_device_info(
+            cuda_visible_devices=gpu_ids,
+            num_nodes=1,
+        )
+
+    print(f"  Algorithms: {algos or 'all in work_dir'}")
+    print(f"  Folds:      {num_fold}")
+    print(f"  Epochs:     {num_epochs} (0 = use auto-computed per algorithm)")
+    print(f"  GPUs:       {num_gpus}")
+    print(f"  analyze=False, algo_gen=False  → patched bundles preserved")
+    print()
+
+    runner.run()
+
+    print("\n" + "=" * 70)
+    print("TRAINING COMPLETE")
+    print("=" * 70)
+    print(f"Results in: {work_dir}")
+    print("  Check <algo>_<fold>/model_fold*/best_metric.yaml for scores")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run MONAI Auto3DSeg on CellMap FIB-SEM data",
@@ -376,6 +489,10 @@ Examples:
   # Generate algorithm bundles (no training)
   python run_auto3dseg.py --mode generate --datalist nifti_data/datalist.json
 
+  # Train only — skip analyze & generate, keep patched bundles
+  python run_auto3dseg.py --mode train --datalist nifti_data/datalist.json \\
+      --algos segresnet swinunetr dints
+
   # Full pipeline with specific algorithms
   python run_auto3dseg.py --mode full --datalist nifti_data/datalist.json \\
       --algos segresnet swinunetr --num_epochs 100
@@ -385,9 +502,9 @@ Examples:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["analyze", "generate", "full"],
+        choices=["analyze", "generate", "train", "full"],
         default="analyze",
-        help="Pipeline mode: analyze, generate, or full",
+        help="Pipeline mode: analyze, generate, train (skip analyze/gen), or full",
     )
     parser.add_argument(
         "--datalist",
@@ -505,6 +622,17 @@ Examples:
             datastats_path=datastats_path,
             algos=args.algos,
             num_fold=args.num_fold,
+        )
+
+    elif args.mode == "train":
+        run_train_only(
+            datalist=args.datalist,
+            dataroot=args.dataroot,
+            work_dir=args.work_dir,
+            algos=args.algos,
+            num_fold=args.num_fold,
+            num_epochs=args.num_epochs,
+            num_gpus=args.num_gpus,
         )
 
     elif args.mode == "full":
