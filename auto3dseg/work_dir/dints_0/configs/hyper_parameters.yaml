@@ -85,7 +85,7 @@ training:
   num_images_per_batch: 2
   num_patches_per_iter: 13
   num_sw_batch_size: null
-  num_workers: 2
+  num_workers: 8
   num_workers_validation: 2
   optimizer: {_target_: torch.optim.SGD, lr: '@training#learning_rate', momentum: 0.9,
     weight_decay: 4.0e-05}

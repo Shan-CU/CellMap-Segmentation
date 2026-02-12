@@ -58,7 +58,7 @@ normalize_mode: range
 intensity_bounds: [10.170212765957446, 187.2127659574468]
 num_epochs_per_validation: 1
 num_epochs_per_saving: 1
-num_workers: 2
+num_workers: 4
 num_steps_per_image: null
 num_crops_per_image: 1
 loss: {_target_: DiceCELoss, include_background: true, squared_pred: true, smooth_nr: 0,

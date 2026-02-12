@@ -68,7 +68,7 @@ num_images_per_batch: 2
 num_patches_per_image: 2
 num_patches_per_iter: 1
 num_sw_batch_size: $@num_patches_per_iter
-num_workers: 2
+num_workers: 8
 num_workers_validation: 2
 optimizer: {_target_: torch.optim.AdamW, lr: '@learning_rate', weight_decay: 1.0e-05}
 output_classes: 14
