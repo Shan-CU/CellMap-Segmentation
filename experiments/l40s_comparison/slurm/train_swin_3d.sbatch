@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:4
-#SBATCH --mem=925g
+#SBATCH --gres=gpu:2
+#SBATCH --mem=512g
 #SBATCH --time=7-00:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/experiments/l40s_comparison/slurm/logs/swin_3d_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/experiments/l40s_comparison/slurm/logs/swin_3d_%j.err
@@ -17,8 +17,8 @@
 # SwinUNETR 3D — L40S Model Comparison
 # ============================================================
 # Loss: Balanced Softmax Tversky (τ=1.0, α=0.6, β=0.4)
-# Batch: 2/GPU × 4 GPUs × 6 accum = 48 effective
-# MOST MEMORY-INTENSIVE MODEL — uses 4 GPUs
+# Batch: 2/GPU × 2 GPUs × 12 accum = 48 effective
+# Reduced to 2 GPUs to avoid OOM from dataset init (792 datasets × N_GPU processes)
 # num_workers=0 REQUIRED for 3D
 # ============================================================
 
@@ -28,20 +28,20 @@ EPOCHS=200
 BATCH_SIZE=2
 ITERATIONS_PER_EPOCH=500
 LEARNING_RATE=5e-5
-GRADIENT_ACCUMULATION=6
+GRADIENT_ACCUMULATION=12
 NUM_WORKERS=0
-N_GPUS=4
+N_GPUS=2
 
 echo "=============================================="
 echo "L40S Model Comparison — SwinUNETR 3D"
 echo "=============================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
-echo "GPUs: ${N_GPUS}x L40S 48GB (192GB total)"
+echo "GPUs: ${N_GPUS}x L40S 48GB"
 echo "Start: $(date)"
 echo "Effective batch: $((BATCH_SIZE * GRADIENT_ACCUMULATION * N_GPUS))"
 echo "num_workers: $NUM_WORKERS (0 required for 3D)"
-echo "WARNING: Most memory-intensive model"
+echo "NOTE: 2 GPUs to reduce host RAM from dataset init"
 echo "=============================================="
 
 PROJECT_ROOT=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
