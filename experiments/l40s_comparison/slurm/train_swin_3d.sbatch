@@ -59,9 +59,12 @@ echo "Python: $($MAMBA_EXE run -n csc which python)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 # Fix glibc malloc arena fragmentation (google/tensorstore#223).
-# Without this, RSS grows ~17 GB/min on 32-core nodes even though
-# in-use heap is flat — glibc retains freed memory in per-thread arenas.
 export MALLOC_ARENA_MAX=1
+
+# Bypass TensorStore entirely — use dask/zarr backend to avoid the
+# unbounded RSS growth from TensorStore's internal memory management.
+# See: janelia-cellmap/cellmap-segmentation-challenge#183
+export CELLMAP_DATA_BACKEND=dask
 
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS

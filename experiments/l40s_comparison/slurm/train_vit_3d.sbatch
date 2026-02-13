@@ -62,6 +62,10 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # in per-thread arenas (up to 8×N_CORES arenas by default).
 export MALLOC_ARENA_MAX=1
 
+# Bypass TensorStore — use dask/zarr backend to avoid unbounded RSS growth
+# See: google/tensorstore#223, janelia-cellmap/cellmap-segmentation-challenge#183
+export CELLMAP_DATA_BACKEND=dask
+
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:64,garbage_collection_threshold:0.7"
