@@ -280,16 +280,20 @@ VIT_3D_CONFIG = {
 }
 
 VIT_2D_CONFIG = {
-    "img_size": INPUT_SHAPE_2D[1],  # 256
-    "patch_size": 16,
-    "hidden_size": 768,
-    "num_layers": 12,
-    "num_heads": 12,
-    "mlp_dim": 3072,
-    "decoder_channels": (256, 128, 64, 16),
-    "dropout_rate": 0.1,
-    "attention_dropout_rate": 0.1,
-    "down_factor": 2,
+    "config": {
+        "img_size": INPUT_SHAPE_2D[1],  # 256
+        "patch_size": 16,
+        "hidden_size": 768,
+        "num_layers": 12,
+        "num_heads": 12,
+        "mlp_dim": 3072,
+        "decoder_channels": (256, 128, 64, 16),
+        "dropout_rate": 0.1,
+        "attention_dropout_rate": 0.1,
+        "down_factor": 2,
+    },
+    "in_channels": 1,
+    "num_classes": len(CLASSES),
 }
 
 # ============================================================

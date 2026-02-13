@@ -57,11 +57,10 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # Fix glibc malloc arena fragmentation (google/tensorstore#223).
 # Without this, RSS grows linearly because glibc retains freed memory
 # in per-thread arenas (up to 8×N_CORES arenas by default).
+# Fix glibc malloc arena fragmentation from TensorStore's cross-thread
+# alloc/free pattern.  tcmalloc's TransferCache handles this natively.
+export LD_PRELOAD=/nas/longleaf/home/gsgeorge/micromamba/envs/csc/lib/libtcmalloc.so.4
 export MALLOC_ARENA_MAX=1
-
-# Bypass TensorStore — use dask/zarr backend to avoid unbounded RSS growth
-# See: google/tensorstore#223, janelia-cellmap/cellmap-segmentation-challenge#183
-export CELLMAP_DATA_BACKEND=dask
 
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
