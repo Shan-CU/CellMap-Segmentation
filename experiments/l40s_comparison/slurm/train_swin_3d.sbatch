@@ -63,6 +63,8 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # See: google/tensorstore#223, deep research analysis
 export LD_PRELOAD=/nas/longleaf/home/gsgeorge/micromamba/envs/csc/lib/libtcmalloc.so.4
 export MALLOC_ARENA_MAX=1
+# Bypass TensorStore entirely — use dask/zarr to avoid unbounded RSS growth
+export CELLMAP_DATA_BACKEND=dask
 
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
