@@ -22,8 +22,11 @@ Usage:
 """
 
 import argparse
+import ctypes
+import gc
 import multiprocessing
 import os
+import platform
 import random
 import sys
 import time
@@ -125,6 +128,32 @@ from losses import (
 
 
 # ============================================================
+# TensorStore Memory Leak Workaround
+# ============================================================
+# The xarray-tensorstore backend (used by cellmap-data) retains C++ heap
+# memory across iterations due to TensorStore's internal chunk cache and
+# malloc fragmentation.  Python's gc.collect() cannot reclaim this memory
+# because the allocations live outside Python's managed heap.
+#
+# Workaround: call libc malloc_trim(0) to force the C allocator to
+# consolidate free pages and return them to the OS.
+#
+# References:
+#   - google/tensorstore#223  (upstream memory retention)
+#   - janelia-cellmap/cellmap-segmentation-challenge#183 (downstream report)
+
+def force_memory_release():
+    """Force release of TensorStore/C++ heap memory back to the OS."""
+    gc.collect()
+    if platform.system() == "Linux":
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+        except OSError:
+            pass
+
+
+# ============================================================
 # Model Creation
 # ============================================================
 
@@ -163,6 +192,19 @@ def create_model(model_name: str, dimension: str, device: torch.device) -> nn.Mo
 # ============================================================
 
 
+def _extract_tensor(value):
+    """Recursively extract a tensor from nested dicts/lists returned by cellmap_data."""
+    if isinstance(value, torch.Tensor):
+        return value
+    if isinstance(value, dict):
+        # Nested dict — grab the first value and recurse
+        return _extract_tensor(next(iter(value.values())))
+    if isinstance(value, (list, tuple)):
+        tensors = [_extract_tensor(v) for v in value]
+        return torch.stack(tensors)
+    raise TypeError(f"Cannot extract tensor from {type(value)}")
+
+
 def get_fixed_samples(val_loader, num_samples=5, save_path=None):
     """Get or load fixed samples for visualization."""
     if save_path is not None and Path(save_path).exists():
@@ -170,20 +212,25 @@ def get_fixed_samples(val_loader, num_samples=5, save_path=None):
         print(f"Loaded {data['inputs'].shape[0]} fixed samples from {save_path}")
         return data
 
+    # Use the same keys the training loop uses
+    input_keys = list(val_loader.dataset.input_arrays.keys())
+    target_keys = list(val_loader.dataset.target_arrays.keys())
+
     inputs_list = []
     targets_list = []
 
     for batch in val_loader.loader:
-        keys = list(batch.keys())
-        input_key = [k for k in keys if "raw" in k.lower() or "input" in k.lower() or "em" in k.lower()][0]
-        target_keys = [k for k in keys if k != input_key]
-
-        if len(target_keys) == 1:
-            inp = batch[input_key]
-            tgt = batch[target_keys[0]]
+        # Extract inputs — same logic as training loop
+        if len(input_keys) > 1:
+            inp = torch.cat([_extract_tensor(batch[k]) for k in input_keys], dim=1)
         else:
-            inp = batch[keys[0]]
-            tgt = batch[keys[1]] if len(keys) > 1 else batch[keys[0]]
+            inp = _extract_tensor(batch[input_keys[0]])
+
+        # Extract targets
+        if len(target_keys) > 1:
+            tgt = torch.cat([_extract_tensor(batch[k]) for k in target_keys], dim=1)
+        else:
+            tgt = _extract_tensor(batch[target_keys[0]])
 
         inputs_list.append(inp)
         targets_list.append(tgt)
@@ -737,6 +784,10 @@ def train_model(args):
             if writer is not None:
                 writer.add_scalar("train/loss", loss_value, n_iter)
 
+            # Periodic memory trim for 3D models (most severe leak)
+            if args.dim == "3d" and (iter_idx + 1) % 50 == 0:
+                force_memory_release()
+
         # ============================================================
         # Validation
         # ============================================================
@@ -873,6 +924,7 @@ def train_model(args):
                 break
 
         torch.cuda.empty_cache()
+        force_memory_release()
 
     # ============================================================
     # Finalize
