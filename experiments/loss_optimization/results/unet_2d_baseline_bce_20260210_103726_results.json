@@ -1,0 +1,101 @@
+{
+  "run_name": "unet_2d_baseline_bce_20260210_103726",
+  "loss_name": "baseline_bce",
+  "loss_config": {
+    "type": "bce",
+    "description": "Baseline BCEWithLogitsLoss (current default)"
+  },
+  "train_config": {
+    "epochs": 2,
+    "iterations_per_epoch": 20,
+    "learning_rate": 0.0001,
+    "classes": [
+      "nuc",
+      "mito_mem",
+      "er_mem",
+      "pm",
+      "golgi_mem"
+    ],
+    "validate_every": 1
+  },
+  "best_dice": 0.0013644163052937276,
+  "elapsed_seconds": 74.07675099372864,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5529471069574357,
+      "val_loss": 0.5189661145210266,
+      "dice_mean": 0.0,
+      "per_class": {
+        "nuc": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1502168
+        },
+        "mito_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 776139
+        },
+        "er_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 803920
+        },
+        "pm": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 201718
+        },
+        "golgi_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 25187
+        }
+      }
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.4436701640486717,
+      "val_loss": 0.2782078117132187,
+      "dice_mean": 0.0013644163052937276,
+      "per_class": {
+        "nuc": {
+          "dice": 0.006578115333212561,
+          "tp": 3849,
+          "fp": 27535,
+          "fn": 1135011
+        },
+        "mito_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 864656
+        },
+        "er_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 908067
+        },
+        "pm": {
+          "dice": 0.00024396619325607738,
+          "tp": 21,
+          "fp": 623,
+          "fn": 171490
+        },
+        "golgi_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 22437,
+          "fn": 24614
+        }
+      }
+    }
+  ]
+}

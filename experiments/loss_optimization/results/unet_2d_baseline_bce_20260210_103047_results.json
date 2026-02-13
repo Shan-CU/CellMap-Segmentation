@@ -1,0 +1,63 @@
+{
+  "run_name": "unet_2d_baseline_bce_20260210_103047",
+  "loss_name": "baseline_bce",
+  "loss_config": {
+    "type": "bce",
+    "description": "Baseline BCEWithLogitsLoss (current default)"
+  },
+  "train_config": {
+    "epochs": 1,
+    "iterations_per_epoch": 20,
+    "learning_rate": 0.0001,
+    "classes": [
+      "nuc",
+      "mito_mem",
+      "er_mem",
+      "pm",
+      "golgi_mem"
+    ],
+    "validate_every": 1
+  },
+  "best_dice": 0,
+  "elapsed_seconds": 36.76449656486511,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5949375376105308,
+      "val_loss": 0.5763932466506958,
+      "dice_mean": 0.0,
+      "per_class": {
+        "nuc": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1142558
+        },
+        "mito_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 3230,
+          "fn": 803138
+        },
+        "er_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 848127
+        },
+        "pm": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 189879
+        },
+        "golgi_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 24289
+        }
+      }
+    }
+  ]
+}

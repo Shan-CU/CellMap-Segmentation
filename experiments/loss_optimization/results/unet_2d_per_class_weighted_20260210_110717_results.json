@@ -1,0 +1,119 @@
+{
+  "run_name": "unet_2d_per_class_weighted_20260210_110717",
+  "loss_name": "per_class_weighted",
+  "loss_config": {
+    "type": "per_class_combo",
+    "bce_weight": 0.4,
+    "dice_weight": 0.6,
+    "class_weights": {
+      "nuc": 3.0,
+      "endo_mem": 2.5,
+      "er_mem": 2.5,
+      "pm": 2.0,
+      "mito_mem": 1.5,
+      "golgi_mem": 1.5,
+      "vesicle_mem": 1.5,
+      "mvb_mem": 1.5,
+      "mito": 1.0,
+      "golgi": 1.0,
+      "vesicle": 1.0,
+      "mvb": 1.0,
+      "er": 1.0,
+      "mito_ribo": 1.0
+    },
+    "description": "Per-class weighted Dice+BCE (boost hard classes)"
+  },
+  "train_config": {
+    "epochs": 2,
+    "iterations_per_epoch": 20,
+    "learning_rate": 0.0001,
+    "classes": [
+      "nuc",
+      "mito_mem",
+      "er_mem",
+      "pm",
+      "golgi_mem"
+    ],
+    "validate_every": 1
+  },
+  "best_dice": 0.0011438561788225188,
+  "elapsed_seconds": 76.02194738388062,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 1.5459058284759521,
+      "val_loss": 1.5578600287437439,
+      "dice_mean": 0.0,
+      "per_class": {
+        "nuc": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1321911
+        },
+        "mito_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 1364,
+          "fn": 737830
+        },
+        "er_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 797947
+        },
+        "pm": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 209344
+        },
+        "golgi_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 26779
+        }
+      }
+    },
+    {
+      "epoch": 2,
+      "train_loss": 1.4485764741897582,
+      "val_loss": 1.3363168954849243,
+      "dice_mean": 0.0011438561788225188,
+      "per_class": {
+        "nuc": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1455518
+        },
+        "mito_mem": {
+          "dice": 0.005468766402902843,
+          "tp": 2214,
+          "fp": 23765,
+          "fn": 781496
+        },
+        "er_mem": {
+          "dice": 0.00025051449120975085,
+          "tp": 107,
+          "fp": 1275,
+          "fn": 852753
+        },
+        "pm": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 198066
+        },
+        "golgi_mem": {
+          "dice": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 18590
+        }
+      }
+    }
+  ]
+}
