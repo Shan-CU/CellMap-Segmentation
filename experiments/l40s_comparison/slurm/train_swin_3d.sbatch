@@ -58,6 +58,11 @@ export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
 echo "Python: $($MAMBA_EXE run -n csc which python)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
+# Fix glibc malloc arena fragmentation (google/tensorstore#223).
+# Without this, RSS grows ~17 GB/min on 32-core nodes even though
+# in-use heap is flat — glibc retains freed memory in per-thread arenas.
+export MALLOC_ARENA_MAX=1
+
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 2))
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:64,garbage_collection_threshold:0.7"

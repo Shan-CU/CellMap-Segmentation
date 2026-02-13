@@ -128,22 +128,37 @@ from losses import (
 
 
 # ============================================================
-# TensorStore Memory Leak Workaround
+# TensorStore / glibc Memory Fragmentation Workaround
 # ============================================================
-# The xarray-tensorstore backend (used by cellmap-data) retains C++ heap
-# memory across iterations due to TensorStore's internal chunk cache and
-# malloc fragmentation.  Python's gc.collect() cannot reclaim this memory
-# because the allocations live outside Python's managed heap.
+# TensorStore's cross-thread alloc/free pattern (encode on worker threads,
+# free on IO threads) causes severe glibc malloc arena fragmentation.  RSS
+# grows linearly (~17 GB/min for Swin 3D on 32-core nodes) even though
+# in-use heap stays flat — the memory is "free" inside glibc arenas but
+# never returned to the OS.
 #
-# Workaround: call libc malloc_trim(0) to force the C allocator to
-# consolidate free pages and return them to the OS.
+# Root cause: google/tensorstore#223 — confirmed by maintainers (@jbms,
+# @laramiel, @daniel-wer).  The growth correlates with CPU core count
+# because glibc creates up to 8×N_CORES arenas by default.
+#
+# Fix (primary): Set MALLOC_ARENA_MAX=1 in the environment (done in all
+# sbatch files).  This limits glibc to a single arena, eliminating
+# fragmentation entirely.
+#
+# Fix (secondary): Call gc.collect() + malloc_trim(0) periodically to
+# nudge glibc into releasing any remaining free pages.
+#
+# NOTE: The default cache_pool total_bytes_limit is 0 (= caching
+# disabled).  Do NOT set a non-zero limit — that would *enable* an LRU
+# cache and increase memory use, not decrease it.
 #
 # References:
-#   - google/tensorstore#223  (upstream memory retention)
+#   - google/tensorstore#223            (root cause discussion)
+#   - google/tensorstore#235            (duplicate, merged into #223)
 #   - janelia-cellmap/cellmap-segmentation-challenge#183 (downstream report)
 
+
 def force_memory_release():
-    """Force release of TensorStore/C++ heap memory back to the OS."""
+    """Force release of C++ heap memory back to the OS (secondary measure)."""
     gc.collect()
     if platform.system() == "Linux":
         try:
