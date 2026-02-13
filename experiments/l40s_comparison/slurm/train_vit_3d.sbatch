@@ -89,6 +89,7 @@ $MAMBA_EXE run -n csc torchrun --standalone --nproc_per_node=$N_GPUS \
     --gradient_accumulation $GRADIENT_ACCUMULATION \
     --num_workers $NUM_WORKERS \
     --amp \
+    --no_compile \
     --vis_every 10 \
     --checkpoint_every 25
 
