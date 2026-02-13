@@ -39,6 +39,7 @@ if __name__ == "__main__":
     except RuntimeError:
         pass
 
+import dask
 import numpy as np
 import torch
 import torch.nn as nn
@@ -52,6 +53,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# ============================================================
+# Force dask to use synchronous (single-threaded) scheduler.
+# The default threaded scheduler causes the same glibc malloc
+# arena fragmentation as TensorStore: worker threads allocate
+# numpy arrays during .compute(), main thread frees them →
+# cross-thread alloc/free → unbounded RSS growth.
+# With num_workers=0 there is no benefit from dask threading.
+# ============================================================
+dask.config.set(scheduler="synchronous")
 
 # ============================================================
 # CUDA Optimizations
