@@ -58,6 +58,7 @@ CLASS_COLORS = {
 }
 
 OVERLAY_ALPHA = 0.55
+FG_THRESHOLD = 0.01  # pixels below this in normalized [0,1] image are padding
 
 
 # ======================================================================
@@ -447,6 +448,10 @@ def main():
                 logits = model(inp)                          # (1, C, H, W)
                 sig = torch.sigmoid(logits)
                 pred = (sig > 0.5).float()
+
+                # Zero out predictions on black padding regions
+                fg_mask = (inp.abs().amax(dim=1, keepdim=True) > FG_THRESHOLD)  # (1,1,H,W)
+                pred = pred * fg_mask.float()
 
                 pred_np   = pred[0].cpu().numpy()
                 logits_np = logits[0].cpu().numpy()

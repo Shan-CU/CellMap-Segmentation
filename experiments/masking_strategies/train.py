@@ -203,6 +203,42 @@ def compute_batch_counts(pred, target):
 
 
 # ======================================================================
+# Foreground mask  (exclude black padding from loss & metrics)
+# ======================================================================
+
+FG_THRESHOLD = 0.01  # pixels below this in the normalized [0,1] image are padding
+
+def apply_foreground_mask(inputs, targets):
+    """Set target to NaN wherever the raw image is black (padding).
+
+    CellMap zarr crops often have black padding regions where no EM data
+    exists.  The model predicts organelles there (free FP), inflating
+    false-positive counts and hurting precision/Dice.
+
+    By injecting NaN into targets at those pixels, ALL existing masking
+    strategies automatically ignore them — no per-strategy changes needed.
+
+    Args:
+        inputs:  (B, C_in, H, W) normalized raw image, typically C_in=1.
+        targets: (B, C_out, H, W) target with existing NaN for unannotated.
+
+    Returns:
+        targets with additional NaN at padding pixels (modified in-place).
+    """
+    # inputs may be (B, 1, H, W) or (B, H, W) — handle both
+    if inputs.dim() == 4:
+        fg_mask = (inputs.abs().amax(dim=1, keepdim=True) > FG_THRESHOLD)  # (B, 1, H, W)
+    else:
+        fg_mask = (inputs.abs() > FG_THRESHOLD).unsqueeze(1)  # (B, 1, H, W)
+
+    # Expand to match target channels: (B, 1, H, W) broadcasts to (B, C, H, W)
+    # Set target to NaN where fg_mask is False (padding region)
+    targets = targets.clone()
+    targets[~fg_mask.expand_as(targets)] = float('nan')
+    return targets
+
+
+# ======================================================================
 # Train / Validate
 # ======================================================================
 
@@ -221,6 +257,9 @@ def train_epoch(model, loader, criterion, optimizer, scaler, scheduler,
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)
         targets = batch['output'].to(device)
+
+        # Mask out black padding regions (NaN injected into targets)
+        targets = apply_foreground_mask(inputs, targets)
 
         optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast('cuda', enabled=USE_AMP):
@@ -273,6 +312,9 @@ def validate(model, loader, criterion, device, classes):
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)
         targets = batch['output'].to(device)
+
+        # Mask out black padding regions
+        targets = apply_foreground_mask(inputs, targets)
 
         with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)

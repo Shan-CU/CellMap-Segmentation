@@ -252,6 +252,26 @@ def compute_batch_counts(pred, target):
     return {'tp': tp_list, 'fp': fp_list, 'fn': fn_list}
 
 
+# ============================================================
+# Foreground mask  (exclude black padding from metrics)
+# ============================================================
+
+FG_THRESHOLD = 0.01  # pixels below this in the normalized [0,1] image are padding
+
+def apply_foreground_mask(inputs, targets):
+    """Set target to NaN wherever the raw image is black (padding).
+
+    Identical to train.py's apply_foreground_mask.
+    """
+    if inputs.dim() == 4:
+        fg_mask = (inputs.abs().amax(dim=1, keepdim=True) > FG_THRESHOLD)
+    else:
+        fg_mask = (inputs.abs() > FG_THRESHOLD).unsqueeze(1)
+    targets = targets.clone()
+    targets[~fg_mask.expand_as(targets)] = float('nan')
+    return targets
+
+
 @torch.no_grad()
 def evaluate_model_on_dataset(model, val_loader, device='cuda', batch_limit=200):
     """Evaluate model on a validation dataset.
@@ -281,6 +301,9 @@ def evaluate_model_on_dataset(model, val_loader, device='cuda', batch_limit=200)
         if inputs.dim() == 5 and inputs.shape[1] == 1:
             inputs = inputs.squeeze(1)
         targets = batch['output'].to(device, non_blocking=True)
+
+        # Mask out black padding regions
+        targets = apply_foreground_mask(inputs, targets)
 
         with torch.amp.autocast('cuda', enabled=USE_AMP):
             outputs = model(inputs)
