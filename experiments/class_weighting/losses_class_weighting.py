@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Class Weighting Loss Functions for CellMap Segmentation
 
@@ -48,7 +49,7 @@ from typing import Optional, Dict, List
 # ================================================================
 
 class _PerClassTverskyBase(nn.Module):
-    """Per-class Tversky loss base with NaN masking.
+    """Per-class Tversky loss base with optional NaN masking.
 
     All three weighting strategies build on top of this base.
     The base computes per-class Tversky losses and returns them as a
@@ -56,19 +57,24 @@ class _PerClassTverskyBase(nn.Module):
     per-class scaling.
 
     Args:
-        alpha: FP weight (higher → penalise false positives more →
-               higher precision).  Default 0.6 per Shenron results.
-        beta:  FN weight (higher → penalise false negatives more →
-               higher recall).  Default 0.4.
-        smooth: Smoothing factor to prevent division by zero.
+        alpha:    FP weight (higher → penalise false positives more →
+                  higher precision).  Default 0.6 per Shenron results.
+        beta:     FN weight (higher → penalise false negatives more →
+                  higher recall).  Default 0.4.
+        smooth:   Smoothing factor to prevent division by zero.
+        mask_nan: If True (default), unannotated (NaN) pixels are
+                  excluded from loss.  If False, NaN pixels are
+                  treated as background (0), so predicting positive
+                  on unannotated regions is penalised as FP.
     """
 
     def __init__(self, alpha: float = 0.6, beta: float = 0.4,
-                 smooth: float = 1e-6):
+                 smooth: float = 1e-6, mask_nan: bool = True):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.smooth = smooth
+        self.mask_nan = mask_nan
 
     def per_class_tversky(self, pred: torch.Tensor,
                           target: torch.Tensor) -> torch.Tensor:
@@ -88,16 +94,23 @@ class _PerClassTverskyBase(nn.Module):
             pred_c = pred[:, c]        # (B, H, W)
             target_c = target[:, c]    # (B, H, W)
 
-            valid = ~target_c.isnan()
             target_clean = target_c.nan_to_num(0)
 
-            if valid.sum() == 0:
-                losses.append(torch.tensor(0.0, device=pred.device))
-                continue
-
-            pred_sig = torch.sigmoid(pred_c)
-            p = (pred_sig * valid).flatten()
-            t = (target_clean * valid).flatten()
+            if self.mask_nan:
+                # Original behaviour: exclude unannotated pixels
+                valid = ~target_c.isnan()
+                if valid.sum() == 0:
+                    losses.append(torch.tensor(0.0, device=pred.device))
+                    continue
+                pred_sig = torch.sigmoid(pred_c)
+                p = (pred_sig * valid).flatten()
+                t = (target_clean * valid).flatten()
+            else:
+                # No masking: treat NaN as background (0)
+                # Predicting positive on unannotated pixels → FP penalty
+                pred_sig = torch.sigmoid(pred_c)
+                p = pred_sig.flatten()
+                t = target_clean.flatten()
 
             tp = (p * t).sum()
             fp = (p * (1 - t)).sum()
@@ -135,8 +148,9 @@ class PerClassWeightedTversky(_PerClassTverskyBase):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
+        mask_nan: bool = True,
     ):
-        super().__init__(alpha=alpha, beta=beta, smooth=smooth)
+        super().__init__(alpha=alpha, beta=beta, smooth=smooth, mask_nan=mask_nan)
         self.classes = classes
 
         weights = class_weights or {c: 1.0 for c in classes}
@@ -145,7 +159,8 @@ class PerClassWeightedTversky(_PerClassTverskyBase):
             'weights', torch.tensor(weight_list, dtype=torch.float32)
         )
 
-        print(f"PerClassWeightedTversky (α={alpha}, β={beta}):")
+        mask_str = 'ON (exclude NaN)' if mask_nan else 'OFF (NaN → background)'
+        print(f"PerClassWeightedTversky (α={alpha}, β={beta}, mask_nan={mask_str}):")
         for c, w in zip(classes, weight_list):
             print(f"  {c}: weight={w:.3f}")
 
@@ -197,8 +212,9 @@ class ClassBalancedTverskyLoss(_PerClassTverskyBase):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
+        mask_nan: bool = True,
     ):
-        super().__init__(alpha=alpha, beta=beta, smooth=smooth)
+        super().__init__(alpha=alpha, beta=beta, smooth=smooth, mask_nan=mask_nan)
         self.classes = classes
         self.beta_cb = beta_cb
 
@@ -216,7 +232,8 @@ class ClassBalancedTverskyLoss(_PerClassTverskyBase):
             self._update_interval = 50
             self._batch_counter = 0
 
-        print(f"ClassBalancedTverskyLoss (β_cb={beta_cb}, α={alpha}, β={beta}):")
+        mask_str = 'ON (exclude NaN)' if mask_nan else 'OFF (NaN → background)'
+        print(f"ClassBalancedTverskyLoss (β_cb={beta_cb}, α={alpha}, β={beta}, mask_nan={mask_str}):")
         for c, w in zip(classes, self.weights.tolist()):
             print(f"  {c}: weight={w:.4f}")
 
@@ -290,8 +307,9 @@ class BalancedSoftmaxTverskyLoss(_PerClassTverskyBase):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
+        mask_nan: bool = True,
     ):
-        super().__init__(alpha=alpha, beta=beta, smooth=smooth)
+        super().__init__(alpha=alpha, beta=beta, smooth=smooth, mask_nan=mask_nan)
         self.classes = classes
         self.tau = tau
 
@@ -308,7 +326,8 @@ class BalancedSoftmaxTverskyLoss(_PerClassTverskyBase):
             self._update_interval = 50
             self._batch_counter = 0
 
-        print(f"BalancedSoftmaxTverskyLoss (τ={tau}, α={alpha}, β={beta}):")
+        mask_str = 'ON (exclude NaN)' if mask_nan else 'OFF (NaN → background)'
+        print(f"BalancedSoftmaxTverskyLoss (τ={tau}, α={alpha}, β={beta}, mask_nan={mask_str}):")
         for c, a in zip(classes, self.logit_adj.tolist()):
             print(f"  {c}: logit_adj={a:+.4f}")
 
@@ -349,20 +368,25 @@ class BalancedSoftmaxTverskyLoss(_PerClassTverskyBase):
         for c in range(n_classes):
             pred_c = pred[:, c]
             target_c = target[:, c]
-            valid = ~target_c.isnan()
             target_clean = target_c.nan_to_num(0)
-
-            if valid.sum() == 0:
-                losses.append(torch.tensor(0.0, device=pred.device))
-                continue
 
             # Adjusted logits: subtract centred log-prior
             # Rare class → adj[c] < 0 → subtract neg = add → logit ↑ → sigmoid ↑
             adjusted = pred_c - adj[c]
             pred_sig = torch.sigmoid(adjusted)
 
-            p = (pred_sig * valid).flatten()
-            t = (target_clean * valid).flatten()
+            if self.mask_nan:
+                # Original: exclude unannotated pixels
+                valid = ~target_c.isnan()
+                if valid.sum() == 0:
+                    losses.append(torch.tensor(0.0, device=pred.device))
+                    continue
+                p = (pred_sig * valid).flatten()
+                t = (target_clean * valid).flatten()
+            else:
+                # No masking: NaN → 0 (background), FP on unannotated penalised
+                p = pred_sig.flatten()
+                t = target_clean.flatten()
 
             tp = (p * t).sum()
             fp = (p * (1 - t)).sum()
@@ -410,8 +434,9 @@ class SeesawTverskyLoss(_PerClassTverskyBase):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
+        mask_nan: bool = True,
     ):
-        super().__init__(alpha=alpha, beta=beta, smooth=smooth)
+        super().__init__(alpha=alpha, beta=beta, smooth=smooth, mask_nan=mask_nan)
         self.classes = classes
         self.p = p_mitigation
         self.q = q_compensation
@@ -515,12 +540,14 @@ def get_weighting_loss(
     alpha = kwargs.pop('alpha', 0.6)
     beta = kwargs.pop('beta', 0.4)
     smooth = kwargs.pop('smooth', 1e-6)
+    mask_nan = kwargs.pop('mask_nan', True)
 
     if t == 'per_class_tversky':
         return PerClassWeightedTversky(
             classes=classes,
             class_weights=kwargs.get('class_weights'),
             alpha=alpha, beta=beta, smooth=smooth,
+            mask_nan=mask_nan,
         )
 
     elif t == 'class_balanced':
@@ -529,6 +556,7 @@ def get_weighting_loss(
             class_voxel_counts=class_voxel_counts,
             beta_cb=kwargs.get('beta_cb', 0.9999),
             alpha=alpha, beta=beta, smooth=smooth,
+            mask_nan=mask_nan,
         )
 
     elif t in ('balanced_softmax', 'logit_adjustment'):
@@ -537,6 +565,7 @@ def get_weighting_loss(
             class_voxel_counts=class_voxel_counts,
             tau=kwargs.get('tau', 1.0),
             alpha=alpha, beta=beta, smooth=smooth,
+            mask_nan=mask_nan,
         )
 
     elif t == 'seesaw':
@@ -546,6 +575,7 @@ def get_weighting_loss(
             p_mitigation=kwargs.get('p_mitigation', 0.8),
             q_compensation=kwargs.get('q_compensation', 2.0),
             alpha=alpha, beta=beta, smooth=smooth,
+            mask_nan=mask_nan,
         )
 
     else:

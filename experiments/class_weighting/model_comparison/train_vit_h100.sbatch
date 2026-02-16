@@ -40,7 +40,7 @@ handle_preempt() {
     fi
     echo "Resubmitting job..."
     cd "$SLURM_SUBMIT_DIR"
-    sbatch "$0"
+    sbatch "${SLURM_SUBMIT_DIR}/$(basename "${BASH_SOURCE[0]:-$0}")"
     exit 0
 }
 trap 'handle_preempt' USR1
@@ -57,14 +57,13 @@ echo "GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Start time: $(date)"
 
 # ── Navigate to experiment directory ──────────────────────────
+# NOTE: $0 inside SLURM points to a copy in /var/spool/slurmd/,
+# so we must use SLURM_SUBMIT_DIR to find the real experiment dir.
 cd "$SLURM_SUBMIT_DIR" || exit 1
-EXPERIMENT_DIR="$(dirname "$(readlink -f "$0")")"
-cd "$EXPERIMENT_DIR" || exit 1
 echo "Working directory: $(pwd)"
 
 # ── Load modules and conda ───────────────────────────────────
 module purge
-module load slurm/blanca
 module load anaconda 2>/dev/null || true
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -94,7 +93,7 @@ N_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "GPUs: $N_GPUS"
 for i in $(seq 0 $((N_GPUS-1))); do
     GPU_NAME=$(python -c "import torch; print(torch.cuda.get_device_name($i))")
-    GPU_MEM=$(python -c "import torch; print(f'{torch.cuda.get_device_properties($i).total_mem / 1e9:.1f} GB')")
+    GPU_MEM=$(python -c "import torch; print(f'{torch.cuda.get_device_properties($i).total_memory / 1e9:.1f} GB')")
     echo "  GPU $i: $GPU_NAME ($GPU_MEM)"
 done
 

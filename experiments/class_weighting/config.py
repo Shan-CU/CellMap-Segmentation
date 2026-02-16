@@ -63,6 +63,58 @@ TVERSKY_ALPHA = 0.6   # FP weight — mild precision bias
 TVERSKY_BETA = 0.4    # FN weight
 
 # ============================================================
+# TVERSKY α/β TUNING (Experiment 2: boost precision)
+#
+# Results from the class-weighting comparison showed universally
+# low precision / high recall across all 15 models (baseline α=0.6, β=0.4).
+#
+# Strategy: INCREASE α (FP penalty) to suppress false positives,
+# but KEEP β high — don't crush it to 0.1–0.3.  Low β kills the
+# structural signal the model needs to learn correct shapes.
+#
+# Uses balanced_softmax_tau_1.0 (best from Exp 1, Dice=0.3171).
+# ============================================================
+
+TVERSKY_TUNING_CONFIGS = {
+    # ── α=0.6 sweep (same FP penalty as baseline, raise β) ───
+    'tversky_a0.6_b0.6': {
+        'type': 'balanced_softmax',
+        'alpha': 0.6,
+        'beta': 0.6,
+        'tau': 1.0,
+        'description': 'BalSoftmax — α=0.6 β=0.6 (symmetric, higher overall penalty)',
+    },
+
+    # ── α=0.7 sweep ──────────────────────────────────────────
+    'tversky_a0.7_b0.6': {
+        'type': 'balanced_softmax',
+        'alpha': 0.7,
+        'beta': 0.6,
+        'tau': 1.0,
+        'description': 'BalSoftmax — α=0.7 β=0.6 (mild FP bias, strong FN penalty)',
+    },
+
+    # ── α=0.8 sweep ──────────────────────────────────────────
+    'tversky_a0.8_b0.6': {
+        'type': 'balanced_softmax',
+        'alpha': 0.8,
+        'beta': 0.6,
+        'tau': 1.0,
+        'description': 'BalSoftmax — α=0.8 β=0.6 (strong FP bias, strong FN penalty)',
+    },
+    'tversky_a0.8_b0.7': {
+        'type': 'balanced_softmax',
+        'alpha': 0.8,
+        'beta': 0.7,
+        'tau': 1.0,
+        'description': 'BalSoftmax — α=0.8 β=0.7 (strong FP bias, very strong FN penalty)',
+    },
+
+    # NOTE: No-mask / masking strategy experiments moved to
+    # experiments/masking_strategies/
+}
+
+# ============================================================
 # AUTO-LOADED FREQUENCY WEIGHTS
 #
 # If compute_class_frequencies.py has been run, load the computed
@@ -271,6 +323,11 @@ LOSS_CONFIGS = {
         'q_compensation': 3.0,
         'description': 'Seesaw Tversky p=0.8 q=3.0 (stronger compensation)',
     },
+
+    # -----------------------------------------------------------
+    # Tversky α/β tuning — sweep FP penalty (Experiment 2)
+    # -----------------------------------------------------------
+    **TVERSKY_TUNING_CONFIGS,
 }
 
 # ============================================================

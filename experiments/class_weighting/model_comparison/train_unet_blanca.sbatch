@@ -32,14 +32,13 @@ echo "GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Start time: $(date)"
 
 # ── Navigate to experiment directory ──────────────────────────
+# NOTE: $0 inside SLURM points to a copy in /var/spool/slurmd/,
+# so we must use SLURM_SUBMIT_DIR to find the real experiment dir.
 cd "$SLURM_SUBMIT_DIR" || exit 1
-EXPERIMENT_DIR="$(dirname "$0")"
-cd "$EXPERIMENT_DIR" || exit 1
 echo "Working directory: $(pwd)"
 
 # ── Load modules and conda ───────────────────────────────────
 module purge
-module load slurm/blanca
 module load anaconda 2>/dev/null || true
 
 if ! command -v conda >/dev/null 2>&1; then
