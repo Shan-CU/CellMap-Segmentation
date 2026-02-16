@@ -25,8 +25,8 @@
 #   Phase 2: vit(GPU0) — runs on first available GPU after phase 1
 #
 # Each model gets a full H100 (100GB) — no DDP overhead.
-# Batch size 64 per model (single GPU, no splits).
-# torch.compile enabled for max throughput.
+# Batch size 128 for CNNs, 64 for ViT (single GPU, no splits).
+# torch.compile disabled (stability issues with some ops).
 # ============================================================
 
 # ── Graceful preemption handler ───────────────────────────────
@@ -50,7 +50,7 @@ trap 'handle_preempt' USR1
 
 echo "╔══════════════════════════════════════════════╗"
 echo "║  ALL MODELS — 3× H100 PARALLEL               ║"
-echo "║  1 model per GPU, batch=64, compile=on        ║"
+echo "║  1 model per GPU, batch=128/64, no compile   ║"
 echo "║  Phase 1: resnet + unet + swin                ║"
 echo "║  Phase 2: vit                                  ║"
 echo "╚══════════════════════════════════════════════╝"
@@ -134,7 +134,7 @@ BATCH_VIT=64
 echo ""
 echo "=========================================="
 echo "  Single-GPU config: batch_size=$BATCH (ViT=$BATCH_VIT)"
-echo "  torch.compile=ON  (no DDP overhead)"
+echo "  torch.compile=OFF  (no DDP overhead)"
 echo "=========================================="
 
 # ── Helper function ───────────────────────────────────────────
@@ -153,6 +153,7 @@ run_model() {
         --model $MODEL \
         --batch_size $BS \
         --resume \
+        --no_compile \
         > "$LOGFILE" 2>&1
 
     local EXIT_CODE=$?
