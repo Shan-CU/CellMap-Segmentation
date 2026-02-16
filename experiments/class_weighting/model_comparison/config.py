@@ -181,7 +181,7 @@ MAX_GRAD_NORM = 1.0
 NUM_WORKERS = 0       # 0 is optimal for zarr datasets
 DATALOADER_CONFIG = {
     'num_workers': NUM_WORKERS,
-    'pin_memory': True,
+    'pin_memory': False,  # Must be False — CellMapDataLoader moves data to CUDA directly
     'persistent_workers': False,
     'prefetch_factor': None,
 }
