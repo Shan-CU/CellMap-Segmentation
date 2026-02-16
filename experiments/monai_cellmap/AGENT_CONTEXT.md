@@ -119,37 +119,21 @@ This keeps peak worker RAM at one decompressed NIfTI (~hundreds of MB) instead o
 
 ### Job: 30530860 (started 2026-02-13 ~4:06 PM EST)
 
-| Model | Final Epoch | Status | Best Mean Dice | Final Loss |
-|-------|------------|--------|---------------|------------|
-| **FlexUNet** | 599/599 | ✅ COMPLETE | **0.2329** | 0.78 |
-| **SegResNet** | 556/599 | ~93% done | 0.1585 | 0.74 |
-| **SwinUNETR** | 569/599 | ~95% done | 0.1787 | 0.73 |
+| Model | Final Epoch | Status | Best Mean Dice | Best Epoch | Final Loss |
+|-------|------------|--------|---------------|------------|------------|
+| **FlexUNet** | 599/599 | ✅ COMPLETE | **0.2329** | 204 | 0.7909 |
+| **SegResNet** | 599/599 | ✅ COMPLETE ~6PM | 0.1585 | 519 | 0.7333 |
+| **SwinUNETR** | 599/599 | ✅ COMPLETE ~4:30PM | 0.1787 | 139 | 0.7319 |
 
-### Per-Class Dice (latest validation, best model per class)
-
-| Class | Best Model | Dice | Notes |
-|-------|-----------|------|-------|
-| nuc | FlexUNet | 0.480 | Strongest class — large, well-annotated |
-| ecs | SwinUNETR | 0.313 | Large extracellular space |
-| golgi_lum | SegResNet | 0.377 | |
-| golgi_mem | SegResNet | 0.312 | |
-| mito_lum | SwinUNETR | 0.163 | |
-| mito_mem | SegResNet | 0.149 | |
-| er_lum | SwinUNETR | 0.147 | |
-| er_mem | SwinUNETR | 0.123 | |
-| pm | SwinUNETR | 0.070 | Thin membranes — hard |
-| endo_lum | SwinUNETR | 0.067 | |
-| endo_mem | SwinUNETR | 0.035 | |
-| ves_lum | FlexUNet | 0.786* | *Likely fluke from tiny patch |
-| ves_mem | FlexUNet | 0.002 | Near zero — vesicles are tiny & rare |
-| mito_ribo | SwinUNETR | 0.001 | Near zero |
+> **Detailed per-class Dice, GPU utilization, training dynamics, and Round 2 recommendations: see Section 16.**
 
 ### Key Observations from TensorBoard
-- **SegResNet**: Best Dice plateaued at epoch ~100 (0.1585). Loss still declining but val not improving.
-- **FlexUNet**: Best model overall. Best Dice jumped around epoch 130–150, then plateaued.
-- **SwinUNETR**: Second best. Still slowly creeping up at epoch 380.
-- **Validation is very noisy** — small val set + multi-label = high variance.
-- **FlexUNet trains faster** (~354s/epoch vs ~478s for SegResNet) due to smaller patches + larger batch.
+- **Best metrics hit very early**: FlexUNet best ep204, SwinUNETR ep139 — long tail was wasted.
+- **SegResNet**: Slow but steady. Best Dice at ep519 — latest improvement among 3 models.
+- **FlexUNet**: Best model overall. Best Dice 0.2329. Only model with non-zero ves and decent endo.
+- **SwinUNETR**: Best at mito, er. Best at ep139 — peaked earliest, most volatile val.
+- **Validation is very noisy** — small val set + multi-label + random crops = ±0.10 swings.
+- **Models are highly complementary** — per-class ensemble is the right strategy.
 
 ---
 
@@ -431,3 +415,87 @@ experiments/monai_cellmap/
 | Round 3: nnU-Net | 2× L40S | 256 GB | ~3–5 days |
 | 2D models (CSC framework) | 1× L40S | 256 GB | ~1–2 days |
 | Final submission packaging | CPU only | 64 GB | ~1 hr |
+
+---
+
+## 16. Round 1 Training Analysis (Final, 2026-02-16)
+
+### Final Training Results
+
+| Model | Epochs | Best Mean Dice | Best Epoch | Final Loss | Status |
+|-------|--------|---------------|------------|------------|--------|
+| **FlexUNet** | 599/599 | **0.2329** | 204 | 0.7909 | ✅ Complete |
+| **SegResNet** | 599/599 | 0.1585 | 519 | 0.7333 | ✅ Complete ~6 PM |
+| **SwinUNETR** | 599/599 | 0.1787 | 139 | 0.7319 | ✅ Complete ~4:30 PM |
+
+### Per-Class Dice at Best Checkpoint
+
+| Class | SegResNet | FlexUNet | SwinUNETR | Best |
+|-------|-----------|----------|-----------|------|
+| nuc | **0.5145** | 0.4042 | 0.4959 | SegResNet |
+| ves_lum | 0.0012 | **0.5008** | 0.0003 | FlexUNet |
+| ves_mem | 0.0024 | **0.4685** | 0.0007 | FlexUNet |
+| mito_ribo | 0.0011 | **0.3846** | 0.4615 | SwinUNETR |
+| golgi_lum | **0.3761** | 0.3193 | 0.3394 | SegResNet |
+| golgi_mem | **0.3380** | 0.3165 | 0.2848 | SegResNet |
+| ecs | **0.3131** | 0.2869 | 0.2739 | SegResNet |
+| mito_lum | **0.2185** | 0.1669 | 0.1664 | SegResNet |
+| mito_mem | 0.1756 | 0.1276 | **0.1865** | SwinUNETR |
+| er_lum | 0.1069 | 0.0857 | **0.1191** | SwinUNETR |
+| er_mem | 0.0877 | 0.0704 | **0.0999** | SwinUNETR |
+| pm | 0.0535 | **0.0714** | 0.0591 | FlexUNet |
+| endo_lum | 0.0162 | **0.0342** | 0.0062 | FlexUNet |
+| endo_mem | 0.0140 | **0.0229** | 0.0083 | FlexUNet |
+
+### GPU Memory Utilization (stable across entire 3-day run)
+
+| Model | GPUs | VRAM/GPU | VRAM Total | Utilization | Headroom |
+|-------|------|----------|------------|-------------|----------|
+| **SegResNet** | 0, 1 | 25.1 GB | 46 GB | **55%** | ~21 GB — can increase batch or crop size |
+| **FlexUNet** | 2, 3 | 13.6 GB | 46 GB | **30%** | ~32 GB — massive headroom |
+| **SwinUNETR** | 4 | 38.6 GB | 46 GB | **84%** | ~7 GB — near limit |
+| **SwinUNETR** | 5 | 41.4 GB | 46 GB | **90%** | ~5 GB — DO NOT increase |
+
+- **RAM**: Peak 363 GB / 1007 GB (36%). Typical 150-250 GB.
+- Memory was rock-stable — no spikes or OOM across 870+ monitor snapshots.
+
+### Training Batch Sizes (Round 1)
+
+| Model | batch_size | num_samples | GPUs | Effective patches/step | Crop size |
+|-------|-----------|-------------|------|----------------------|-----------|
+| SegResNet | 2 | 4 | 2 | 16 | 128³ |
+| FlexUNet | 4 | 4 | 2 | 32 | 128³ |
+| SwinUNETR | 2 | 4 | 2 | 16 | 128³ |
+
+### Loss Progression
+
+| Model | Epoch 0 | Epoch 50 | Final | Δ |
+|-------|---------|----------|-------|---|
+| SegResNet | 0.8061 | 0.7470 | 0.7333 | -0.073 |
+| FlexUNet | 0.8749 | 0.8423 | 0.7909 | -0.084 |
+| SwinUNETR | 0.8091 | 0.7584 | 0.7319 | -0.077 |
+
+### Key Findings for Round 2
+
+1. **Best metrics hit early, then plateau**: FlexUNet best at epoch 204, SwinUNETR at 139 — 
+   late training was wasted. Need warm restarts or cyclic LR.
+2. **Extreme validation noise**: Val Dice bounces ±0.10 between epochs. Small val set + 
+   multi-label + random crops = high variance.
+3. **Class imbalance is the #1 issue**: endo, pm, ves near zero. Tversky α=0.6/β=0.4 
+   biases toward precision (penalizes FP more). Round 2: flip to α=0.3/β=0.7 for rare classes.
+4. **Mixup + partial annotations interaction**: Mixed targets dilute toward zero for 
+   unannotated classes, subtly suppressing recall. Consider disabling Mixup for Round 2 
+   or using CutMix instead.
+5. **SegResNet & FlexUNet have massive GPU headroom**: Can increase to 192³ crops or 
+   larger batch sizes. SwinUNETR is maxed at 90% VRAM — keep at 128³.
+6. **Models are highly complementary**: SegResNet best at large structures (nuc, golgi, ecs),
+   FlexUNet best at rare/tiny (ves, endo, pm), SwinUNETR best at mid-range (mito, er).
+   Per-class ensemble is the right strategy.
+
+### Round 2 Config Recommendations
+
+| Model | Crop Size | batch_size | GPUs | LR Schedule | α/β Strategy |
+|-------|-----------|-----------|------|-------------|--------------|
+| SegResNet | 192³ | 2 | 2 | Cosine warm restarts | Per-class |
+| FlexUNet | 192³ | 3 | 2 | Cosine warm restarts | Per-class |
+| SwinUNETR | 128³ | 2 | 2 | Cosine warm restarts + pretrained | Per-class |
