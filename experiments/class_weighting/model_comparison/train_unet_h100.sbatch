@@ -2,7 +2,7 @@
 #SBATCH --job-name=mc_unet_h100
 #SBATCH --qos=preemptable
 #SBATCH --partition=blanca-bortz
-#SBATCH --account=blanca-bortz
+#SBATCH --account=blanca-biokem
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=48
