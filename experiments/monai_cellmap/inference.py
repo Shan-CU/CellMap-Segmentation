@@ -32,6 +32,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -132,6 +133,7 @@ class TTAPredictor:
             model: The segmentation model.
             sw_params: Dict of params for sliding_window_inference
                        (roi_size, sw_batch_size, overlap, mode, etc.)
+                       Should include sw_device (GPU) and device (CPU).
         """
         self.model = model
         self.sw_params = sw_params
@@ -141,7 +143,8 @@ class TTAPredictor:
         """Run TTA prediction on a single volume.
 
         Args:
-            volume: (1, 1, D, H, W) input tensor on GPU.
+            volume: (1, 1, D, H, W) input tensor (can be on CPU;
+                    sw_device handles moving patches to GPU).
 
         Returns:
             (1, C, D, H, W) averaged logits on CPU (NOT sigmoid'd).
@@ -155,26 +158,22 @@ class TTAPredictor:
             if flip_dims:
                 x = torch.flip(x, dims=flip_dims)
 
-            # Sliding window inference
+            # Sliding window inference — patches run on GPU (sw_device),
+            # output accumulates on CPU (device) via MONAI internals
             logits = sliding_window_inference(
                 inputs=x,
                 predictor=self._forward_fn,
                 **self.sw_params,
             )
 
-            # Flip prediction back
+            # Flip prediction back (already on CPU from MONAI's device param)
             if flip_dims:
                 logits = torch.flip(logits, dims=flip_dims)
 
-            # Accumulate on CPU to avoid GPU OOM on large volumes
-            logits_cpu = logits.cpu()
-            del logits
-            torch.cuda.empty_cache()
-
             if accum is None:
-                accum = logits_cpu
+                accum = logits
             else:
-                accum = accum + logits_cpu
+                accum = accum + logits
             n += 1
 
         return accum / n
@@ -355,8 +354,8 @@ def compute_dice(pred: np.ndarray, target: np.ndarray, smooth: float = 1e-5) -> 
 # ─── Main Inference ───────────────────────────────────────────────────────
 
 def run_inference(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    n_gpus = torch.cuda.device_count()
+    print(f"Available GPUs: {n_gpus}")
 
     # ── Load thresholds ──
     if args.threshold_json and os.path.exists(args.threshold_json):
@@ -382,31 +381,41 @@ def run_inference(args):
     else:
         model_names = ["flexunet"]  # default to best single model
 
-    # ── Load models ──
+    # ── Load each model onto its own GPU ──
     models = {}
     configs = {}
-    for name in model_names:
+    model_devices = {}  # track which GPU each model is on
+    for i, name in enumerate(model_names):
+        gpu_id = i % max(n_gpus, 1)
+        dev = torch.device(f"cuda:{gpu_id}" if n_gpus > 0 else "cpu")
         ckpt = args.checkpoint if (args.model == name and args.checkpoint) else None
-        model, cfg = load_model(name, device, checkpoint_path=ckpt)
+        model, cfg = load_model(name, dev, checkpoint_path=ckpt)
         models[name] = model
         configs[name] = cfg
+        model_devices[name] = dev
+        print(f"  {name} → {dev}")
 
     # ── Sliding window parameters ──
-    # Use larger window at inference than training for better context
+    # sw_device = GPU for patch computation, device = CPU for output accumulation.
+    # This lets us handle 800³ volumes (29 GB output) without GPU OOM.
     sw_roi = [int(x) for x in args.sw_roi_size.split(",")]
-    sw_params = {
-        "roi_size": sw_roi,
-        "sw_batch_size": args.sw_batch_size,
-        "overlap": args.overlap,
-        "mode": "gaussian",  # Gaussian importance weighting
-        "padding_mode": "replicate",
-    }
     print(f"Sliding window: roi={sw_roi}, overlap={args.overlap}, batch={args.sw_batch_size}")
+
+    def make_sw_params(gpu_device):
+        return {
+            "roi_size": sw_roi,
+            "sw_batch_size": args.sw_batch_size,
+            "overlap": args.overlap,
+            "mode": "gaussian",
+            "padding_mode": "replicate",
+            "sw_device": gpu_device,  # patches computed on GPU
+            "device": "cpu",          # output accumulated on CPU
+        }
 
     # ── Build TTA predictors if enabled ──
     if args.tta:
         predictors = {
-            name: TTAPredictor(model, sw_params)
+            name: TTAPredictor(model, make_sw_params(model_devices[name]))
             for name, model in models.items()
         }
         print(f"TTA enabled: 8 flip combinations per model")
@@ -446,34 +455,45 @@ def run_inference(args):
         vol_name = Path(file_entry["image"]).stem.replace("_0000", "")
         t0 = time.time()
 
-        # Load volume
+        # Load volume — stays on CPU; MONAI's sw_device pulls patches to GPU
         volume, affine, orig_shape = load_volume(file_entry)
-        volume = volume.to(device)
         print(f"\n[{vol_idx+1}/{len(file_list)}] {vol_name}: shape={orig_shape}")
 
-        # ── Get logits from each model ──
-        model_logits = {}
-        for name, model in models.items():
-            with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.bfloat16):
+        # ── Get logits from each model (parallel across GPUs) ──
+        def _run_model(name):
+            model = models[name]
+            dev = model_devices[name]
+            sw_p = make_sw_params(dev)
+            with torch.no_grad(), torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 if args.tta:
-                    logits = predictors[name].predict(volume)
+                    return name, predictors[name].predict(volume)
                 else:
                     def _fwd(x, _backbone=model.backbone):
                         out = _backbone(x)
                         if isinstance(out, (list, tuple)):
                             return out[0]
                         return out
-
-                    logits = sliding_window_inference(
+                    return name, sliding_window_inference(
                         inputs=volume,
                         predictor=_fwd,
-                        **sw_params,
+                        **sw_p,
                     )
 
-            # Move to CPU immediately to free GPU memory for next model
-            model_logits[name] = logits.cpu()  # (1, C, D, H, W) on CPU
-            del logits
-            torch.cuda.empty_cache()
+        model_logits = {}  # all on CPU already (device="cpu" in sw_params)
+        if len(model_names) > 1 and n_gpus > 1:
+            # Run models in parallel — each on its own GPU
+            with ThreadPoolExecutor(max_workers=len(model_names)) as pool:
+                futures = [pool.submit(_run_model, name) for name in model_names]
+                for fut in as_completed(futures):
+                    name, logits = fut.result()
+                    model_logits[name] = logits
+                    print(f"    {name} done")
+        else:
+            # Sequential fallback
+            for name in model_names:
+                _, logits = _run_model(name)
+                model_logits[name] = logits
+                print(f"    {name} done")
 
         # ── Per-class ensemble (on CPU) ──
         if args.ensemble:
@@ -559,9 +579,11 @@ def run_inference(args):
         elapsed = time.time() - t0
         print(f"  Time: {elapsed:.1f}s")
 
-        # Free GPU memory
+        # Free memory
         del volume
-        torch.cuda.empty_cache()
+        for dev in set(model_devices.values()):
+            with torch.cuda.device(dev):
+                torch.cuda.empty_cache()
 
     # ── Summary ──
     print("\n" + "=" * 60)

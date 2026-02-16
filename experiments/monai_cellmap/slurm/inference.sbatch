@@ -6,9 +6,9 @@
 #SBATCH --qos=gpu_access
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
-#SBATCH --mem=256g
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:3
+#SBATCH --mem=900g
 #SBATCH --time=2-00:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/inference_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/inference_%j.err
@@ -23,9 +23,9 @@
 # Step 2: Threshold tuning on probability maps
 # Step 3: Re-run inference with tuned thresholds (no probs, faster)
 #
-# Memory: 256 GB RAM for 800³ volumes (14ch × float32).
-# GPU: 1× L40S 48 GB — models loaded sequentially.
-# Time: ~12-20 hours for 46 val volumes × 3 models × 8 TTA flips.
+# Memory: 900 GB RAM for 800³ volumes (14ch × float32 × 3 models parallel).
+# GPU: 3× L40S 48 GB — one per model, run in parallel.
+# Time: ~6-10 hours for 46 val volumes × 3 models × 8 TTA flips (parallel).
 #
 # Usage:
 #   sbatch experiments/monai_cellmap/slurm/inference.sbatch
@@ -83,7 +83,7 @@ python "$EXP_DIR/inference.py" \
     --postprocess \
     --split val \
     --sw-roi-size 128,128,128 \
-    --sw-batch-size 2 \
+    --sw-batch-size 4 \
     --overlap 0.5 \
     --output-dir "$PRED_DIR" \
     --save-probs \
@@ -106,7 +106,7 @@ python "$EXP_DIR/inference.py" \
     --postprocess \
     --split val \
     --sw-roi-size 128,128,128 \
-    --sw-batch-size 2 \
+    --sw-batch-size 4 \
     --overlap 0.5 \
     --output-dir "${PRED_DIR}_tuned" \
     --threshold-json "$PRED_DIR/thresholds.json" \
