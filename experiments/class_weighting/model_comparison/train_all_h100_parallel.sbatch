@@ -129,11 +129,10 @@ else
 fi
 
 # ── Training parameters ──────────────────────────────────────
-BATCH=128  # Single H100 100GB — 128 for CNNs, 64 for ViT
-BATCH_VIT=64
+BATCH=128  # Single H100 100GB — same batch size for all models
 echo ""
 echo "=========================================="
-echo "  Single-GPU config: batch_size=$BATCH (ViT=$BATCH_VIT)"
+echo "  Single-GPU config: batch_size=$BATCH (all models)"
 echo "  torch.compile=OFF  (no DDP overhead)"
 echo "=========================================="
 
@@ -142,9 +141,6 @@ run_model() {
     local MODEL=$1
     local GPU=$2
     local BS=$BATCH
-    if [ "$MODEL" = "vit" ]; then
-        BS=$BATCH_VIT
-    fi
     local LOGFILE="logs/mc_${MODEL}_gpu${GPU}_${SLURM_JOB_ID}.log"
 
     echo "[$(date +%H:%M:%S)] Starting $MODEL on GPU $GPU (batch=$BS)"
