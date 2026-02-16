@@ -12,7 +12,7 @@
 #SBATCH --output=logs/mc_swin_%j.out
 #SBATCH --error=logs/mc_swin_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=george.stephenson@colorado.edu
+#SBATCH --mail-user=shanmukhavamshi.kuruba@colorado.edu
 
 # ============================================================
 # Model Comparison: Swin Transformer 2D — Blanca Biokem A100
@@ -90,7 +90,7 @@ TB_PORT=$((6006 + SLURM_JOB_ID % 1000))
 echo ""
 echo "=========================================="
 echo "TENSORBOARD: port $TB_PORT"
-echo "SSH tunnel:  ssh -L $TB_PORT:$SLURM_NODELIST:$TB_PORT gest9386@login.rc.colorado.edu"
+echo "SSH tunnel:  ssh -L $TB_PORT:$SLURM_NODELIST:$TB_PORT $USER@login.rc.colorado.edu"
 echo "Browser:     http://localhost:$TB_PORT"
 echo "=========================================="
 
