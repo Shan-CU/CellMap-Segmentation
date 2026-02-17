@@ -8,7 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=64g
-#SBATCH --gres=gpu:0
+#SBATCH --gres=gpu:1
 #SBATCH --time=01:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.err
