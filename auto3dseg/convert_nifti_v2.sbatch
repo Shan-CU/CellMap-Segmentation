@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=convert_nifti_v2
-#SBATCH --partition=sycamore
+#SBATCH --partition=general_big
 #SBATCH --account=rc_alain_pi
 #SBATCH --qos=normal
 #SBATCH --nodes=1
