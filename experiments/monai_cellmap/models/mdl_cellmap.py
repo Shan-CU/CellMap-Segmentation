@@ -128,7 +128,7 @@ class Net(nn.Module):
         ds_weights = getattr(cfg, "ds_weights", None)
 
         self.loss_fn = build_partial_annotation_loss(
-            num_classes=getattr(cfg, "num_classes", 14),
+            num_classes=getattr(cfg, "num_classes", 35),
             loss_type=getattr(cfg, "loss_type", "balanced_softmax_tversky"),
             tversky_alpha=getattr(cfg, "tversky_alpha", 0.6),
             tversky_beta=getattr(cfg, "tversky_beta", 0.4),

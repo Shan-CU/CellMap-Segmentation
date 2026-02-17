@@ -402,9 +402,10 @@ def main():
                 output_dir=output_dir,
                 is_best=is_best,
                 save_weights_only=getattr(cfg, "save_weights_only", False),
+                save_every_n_epochs=getattr(cfg, "save_every_n_epochs", 0),
             )
         elif getattr(cfg, "save_checkpoint", True):
-            # Save latest checkpoint every epoch
+            # Save last checkpoint (not every epoch — controlled by save_every_n_epochs)
             save_checkpoint(
                 model, optimizer, scheduler,
                 epoch=epoch,
@@ -413,6 +414,7 @@ def main():
                 output_dir=output_dir,
                 is_best=False,
                 save_weights_only=getattr(cfg, "save_weights_only", False),
+                save_every_n_epochs=getattr(cfg, "save_every_n_epochs", 0),
             )
 
     # --- Done ---

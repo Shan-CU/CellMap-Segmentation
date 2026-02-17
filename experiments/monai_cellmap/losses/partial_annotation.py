@@ -50,7 +50,7 @@ class PartialTverskyLoss(nn.Module):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
-        num_classes: int = 14,
+        num_classes: int = 35,
     ) -> None:
         super().__init__()
         self.alpha = alpha
@@ -148,7 +148,7 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         alpha: float = 0.6,
         beta: float = 0.4,
         smooth: float = 1e-6,
-        num_classes: int = 14,
+        num_classes: int = 35,
         update_interval: int = 50,
     ) -> None:
         super().__init__()
@@ -329,7 +329,7 @@ class PartialAnnotationDeepSupervisionLoss(nn.Module):
 
 
 def build_partial_annotation_loss(
-    num_classes: int = 14,
+    num_classes: int = 35,
     loss_type: str = "balanced_softmax_tversky",
     # Tversky parameters
     tversky_alpha: float = 0.6,

@@ -31,9 +31,16 @@ from models.mdl_cellmap import Net
 from utils import compute_per_channel_dice
 
 CLASS_NAMES = [
+    # ── Original 14 from Round 1 ──
     "ecs", "pm", "mito_mem", "mito_lum", "mito_ribo",
     "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
     "endo_mem", "endo_lum", "er_mem", "er_lum", "nuc",
+    # ── New for Round 2 ──
+    "lyso_mem", "lyso_lum", "ld_mem", "ld_lum",
+    "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+    "np_out", "np_in", "hchrom", "echrom", "nucpl",
+    "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum",
+    "nhchrom", "nechrom", "nucleo",
 ]
 RUNS_DIR = "/work/users/g/s/gsgeorge/cellmap/runs/monai_cellmap"
 
@@ -80,8 +87,9 @@ def evaluate_model(model_name: str, device: torch.device) -> dict:
     )
 
     # Run validation
-    dice_sum = torch.zeros(14, device=device)
-    valid_sum = torch.zeros(14, device=device)
+    num_classes = len(CLASS_NAMES)
+    dice_sum = torch.zeros(num_classes, device=device)
+    valid_sum = torch.zeros(num_classes, device=device)
 
     with torch.no_grad():
         for batch in tqdm(val_loader, desc=model_name):

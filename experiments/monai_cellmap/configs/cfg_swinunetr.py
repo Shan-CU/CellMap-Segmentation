@@ -12,7 +12,7 @@ from copy import deepcopy
 from common_config import basic_cfg
 
 cfg = deepcopy(basic_cfg)
-cfg.name = "swinunetr"
+cfg.name = "swinunetr_r2"
 cfg.output_dir = f"/work/users/g/s/gsgeorge/cellmap/runs/monai_cellmap/{cfg.name}"
 
 # --- Model ---
@@ -22,19 +22,19 @@ cfg.backbone_args = dict(
     in_channels=cfg.in_channels,
     out_channels=cfg.num_classes,
     feature_size=48,
-    drop_rate=0.0,
-    attn_drop_rate=0.0,
-    dropout_path_rate=0.0,
+    drop_rate=0.1,             # Round 2: add dropout (was 0.0, model overfit early)
+    attn_drop_rate=0.1,        # Round 2: attention dropout
+    dropout_path_rate=0.1,     # Round 2: stochastic depth
     use_v2=True,
 )
 cfg.deep_supervision = False  # SwinUNETR doesn't have built-in DS
 
-# --- Patches: must match img_size ---
+# --- Patches: keep at 96³ (Round 1 was 90% VRAM — DO NOT increase) ---
 cfg.roi_size = [96, 96, 96]
 cfg.num_samples = 4
 cfg.batch_size = 2
 
-# --- Training ---
+# --- Training (Round 2: 300 epochs — best was at ep139/600, most volatile) ---
 cfg.lr = 1e-4
-cfg.epochs = 600
+cfg.epochs = 300
 cfg.eval_epochs = 5

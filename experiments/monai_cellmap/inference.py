@@ -60,11 +60,47 @@ from data.ds_cellmap import (
 
 # ─── Constants ────────────────────────────────────────────────────────────
 CLASS_NAMES = [
+    # ── Original 14 from Round 1 ──
     "ecs", "pm", "mito_mem", "mito_lum", "mito_ribo",
     "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
     "endo_mem", "endo_lum", "er_mem", "er_lum", "nuc",
+    # ── New for Round 2 ──
+    "lyso_mem", "lyso_lum", "ld_mem", "ld_lum",
+    "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+    "np_out", "np_in", "hchrom", "echrom", "nucpl",
+    "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum",
+    "nhchrom", "nechrom", "nucleo",
 ]
-NUM_CLASSES = 14
+NUM_CLASSES = 35
+
+# Group classes: composed at inference time by OR-ing atomic predictions.
+# Maps group_name -> list of atomic class names.
+GROUP_CLASSES = {
+    "mito":       ["mito_mem", "mito_lum", "mito_ribo"],
+    "golgi":      ["golgi_mem", "golgi_lum"],
+    "ves":        ["ves_mem", "ves_lum"],
+    "endo":       ["endo_mem", "endo_lum"],
+    "lyso":       ["lyso_mem", "lyso_lum"],
+    "ld":         ["ld_mem", "ld_lum"],
+    "eres":       ["eres_mem", "eres_lum"],
+    "perox":      ["perox_mem", "perox_lum"],
+    "ne":         ["ne_mem", "ne_lum", "np_out", "np_in"],
+    "np":         ["np_out", "np_in"],
+    "chrom":      ["hchrom", "nhchrom", "echrom", "nechrom"],
+    "mt":         ["mt_out", "mt_in"],
+    "er":         ["er_mem", "er_lum", "eres_mem", "eres_lum",
+                   "ne_mem", "ne_lum", "np_out", "np_in"],
+    "er_mem_all": ["er_mem", "eres_mem", "ne_mem"],
+    "ne_mem_all": ["ne_mem", "np_out", "np_in"],
+    "cell":       ["pm", "mito_mem", "mito_lum", "mito_ribo",
+                   "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
+                   "endo_mem", "endo_lum", "lyso_mem", "lyso_lum",
+                   "ld_mem", "ld_lum", "er_mem", "er_lum",
+                   "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+                   "np_out", "np_in", "hchrom", "nhchrom",
+                   "echrom", "nechrom", "nucpl", "nucleo",
+                   "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum"],
+}
 
 # Default per-class thresholds (start at 0.5, tune on val later)
 DEFAULT_THRESHOLDS = {name: 0.5 for name in CLASS_NAMES}
@@ -72,6 +108,7 @@ DEFAULT_THRESHOLDS = {name: 0.5 for name in CLASS_NAMES}
 # Default per-class model selection based on Round 1 training results
 # (best validation Dice per class — see AGENT_CONTEXT.md §4)
 DEFAULT_ENSEMBLE_MAP = {
+    # ── Round 1 results ──
     "ecs": "swinunetr",
     "pm": "swinunetr",
     "mito_mem": "segresnet",
@@ -86,6 +123,28 @@ DEFAULT_ENSEMBLE_MAP = {
     "er_mem": "swinunetr",
     "er_lum": "swinunetr",
     "nuc": "flexunet",
+    # ── Round 2 (defaults — will be overridden by evaluate_ensemble) ──
+    "lyso_mem": "segresnet",
+    "lyso_lum": "segresnet",
+    "ld_mem": "segresnet",
+    "ld_lum": "segresnet",
+    "eres_mem": "segresnet",
+    "eres_lum": "segresnet",
+    "ne_mem": "segresnet",
+    "ne_lum": "segresnet",
+    "np_out": "segresnet",
+    "np_in": "segresnet",
+    "hchrom": "segresnet",
+    "echrom": "segresnet",
+    "nucpl": "segresnet",
+    "mt_out": "segresnet",
+    "cyto": "segresnet",
+    "mt_in": "segresnet",
+    "perox_mem": "segresnet",
+    "perox_lum": "segresnet",
+    "nhchrom": "segresnet",
+    "nechrom": "segresnet",
+    "nucleo": "segresnet",
 }
 
 # Model checkpoint paths
@@ -263,7 +322,7 @@ def load_volume(file_entry: dict) -> tuple[torch.Tensor, np.ndarray, tuple]:
     return tensor, affine, data.shape
 
 
-def load_ground_truth(file_entry: dict, num_classes: int = 14) -> Optional[torch.Tensor]:
+def load_ground_truth(file_entry: dict, num_classes: int = 35) -> Optional[torch.Tensor]:
     """Load ground truth labels for evaluation.
 
     Returns:

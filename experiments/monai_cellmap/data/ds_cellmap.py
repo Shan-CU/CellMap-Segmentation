@@ -1,8 +1,8 @@
 """
 CellMap NIfTI Dataset for MONAI-based training.
 
-Loads NIfTI images + labels from datalist.json, converts integer labels (0-14)
-to 14-channel binary masks, parses partial annotation masks, and provides
+Loads NIfTI images + labels from datalist.json, converts integer labels (0-35)
+to 35-channel binary masks, parses partial annotation masks, and provides
 random cropping + augmentation for training.
 
 Key design: "crop-first" on-the-fly loading
@@ -23,8 +23,8 @@ that does:
 This means:
 - Peak RAM per DataLoader worker ≈ 1 decompressed NIfTI volume (image + int
   label) — typically a few hundred MB, the 8 GB giant only briefly.
-- The 14-channel float32 expansion happens *after* cropping → 14 × 96³ × 4 B
-  ≈ 50 MB instead of 14 × full-volume × 4 B ≈ 84 GB.
+- The 35-channel float32 expansion happens *after* cropping → 35 × 96³ × 4 B
+  ≈ 124 MB instead of 35 × full-volume × 4 B.
 - No disk cache, no cross-rank duplication, no first-epoch warmup.
 - DataLoader ``num_workers`` controls I/O parallelism.  Use 2 to keep peak RAM
   ≤ 2 concurrent decompressed volumes ≈ 20 GB.
@@ -87,14 +87,14 @@ val_collate_fn = collate_fn
 # ---------------------------------------------------------------------------
 
 class IntegerLabelToMultiChanneld(mt.MapTransform):
-    """Convert integer label (1, Z, Y, X) with values 0-14 to multi-channel
+    """Convert integer label (1, Z, Y, X) with values 0-35 to multi-channel
     binary mask (C, Z, Y, X).
 
     Value 0 = background/unannotated (ignored).
     Values 1..num_classes map to channels 0..num_classes-1.
     """
 
-    def __init__(self, keys="label", num_classes: int = 14):
+    def __init__(self, keys="label", num_classes: int = 35):
         super().__init__(keys)
         self.num_classes = num_classes
 
@@ -137,7 +137,7 @@ class ParseAnnotationMaskd(mt.Transform):
         self,
         source_key: str = "annotated_classes",
         mask_key: str = "annotation_mask",
-        num_classes: int = 14,
+        num_classes: int = 35,
     ):
         super().__init__()
         self.source_key = source_key

@@ -32,11 +32,18 @@ import nibabel as nib
 from data.ds_cellmap import load_datalist
 
 CLASS_NAMES = [
+    # ── Original 14 from Round 1 ──
     "ecs", "pm", "mito_mem", "mito_lum", "mito_ribo",
     "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
     "endo_mem", "endo_lum", "er_mem", "er_lum", "nuc",
+    # ── New for Round 2 ──
+    "lyso_mem", "lyso_lum", "ld_mem", "ld_lum",
+    "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+    "np_out", "np_in", "hchrom", "echrom", "nucpl",
+    "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum",
+    "nhchrom", "nechrom", "nucleo",
 ]
-NUM_CLASSES = 14
+NUM_CLASSES = 35
 RUNS_DIR = "/work/users/g/s/gsgeorge/cellmap/runs/monai_cellmap"
 
 

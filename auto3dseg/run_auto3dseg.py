@@ -163,6 +163,72 @@ def print_datastats_summary(datastats_path: str):
         print(f"\n--- Per-case Stats: {n_cases} cases analyzed ---")
 
 
+def get_gpu_customization_specs(gpu_mem_gb: float = 0) -> dict:
+    """
+    Return GPU customization specs for BundleGen based on available VRAM.
+
+    These specs tell MONAI's GPU optimization to search for the best
+    num_images_per_batch and num_sw_batch_size within the given ranges,
+    running num_trials random-search iterations on the actual GPU.
+
+    Reference: https://github.com/Project-MONAI/tutorials/blob/main/auto3dseg/docs/gpu_opt.md
+    """
+    import torch
+
+    if gpu_mem_gb <= 0 and torch.cuda.is_available():
+        gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+
+    print(f"  GPU memory for optimization: {gpu_mem_gb:.0f} GB")
+
+    if gpu_mem_gb >= 70:  # H100 (80GB) or similar
+        specs = {
+            "universal": {
+                "num_trials": 10,
+                "range_num_images_per_batch": [1, 10],
+                "range_num_sw_batch_size": [1, 20],
+            },
+        }
+    elif gpu_mem_gb >= 40:  # L40S (48GB), A100 (40GB)
+        # Per-algorithm specs — DiNTS NAS is much more VRAM hungry
+        specs = {
+            "segresnet": {
+                "num_trials": 8,
+                "range_num_images_per_batch": [1, 6],
+                "range_num_sw_batch_size": [1, 12],
+            },
+            "swinunetr": {
+                "num_trials": 8,
+                "range_num_images_per_batch": [1, 4],
+                "range_num_sw_batch_size": [1, 8],
+            },
+            "dints": {
+                "num_trials": 5,
+                "range_num_images_per_batch": [1, 2],
+                "range_num_sw_batch_size": [1, 4],
+            },
+        }
+    else:  # V100 (16-32GB), RTX 4090 (24GB)
+        specs = {
+            "segresnet": {
+                "num_trials": 5,
+                "range_num_images_per_batch": [1, 4],
+                "range_num_sw_batch_size": [1, 6],
+            },
+            "swinunetr": {
+                "num_trials": 5,
+                "range_num_images_per_batch": [1, 2],
+                "range_num_sw_batch_size": [1, 4],
+            },
+            "dints": {
+                "num_trials": 3,
+                "range_num_images_per_batch": [1, 1],
+                "range_num_sw_batch_size": [1, 2],
+            },
+        }
+
+    return specs
+
+
 def run_bundle_generation(
     datalist: str,
     dataroot: str,
@@ -171,6 +237,7 @@ def run_bundle_generation(
     algos: list[str] | None = None,
     num_fold: int = 5,
     gpu_customization: bool = False,
+    gpu_customization_specs: dict | None = None,
 ):
     """
     Run BundleGen to create algorithm bundles based on data statistics.
@@ -179,6 +246,11 @@ def run_bundle_generation(
     - Training configs optimized for the dataset
     - Network architecture configs
     - Training/inference scripts
+
+    When gpu_customization=True, MONAI will run random-search trials on the
+    actual GPU to find the optimal batch size and sliding-window batch size
+    that fit in VRAM. If gpu_customization_specs is None, auto-detect GPU
+    memory and use appropriate ranges.
 
     Note: Requires a GPU node — template auto_scale functions call
     torch.cuda.get_device_properties() which needs actual CUDA.
@@ -221,11 +293,25 @@ def run_bundle_generation(
         data_src_cfg_name=data_src_cfg,
     )
 
-    bundle_gen.generate(
-        output_folder=work_dir,
-        num_fold=num_fold,
-        gpu_customization=gpu_customization,
-    )
+    # Build generation kwargs
+    gen_kwargs = {
+        "output_folder": work_dir,
+        "num_fold": num_fold,
+        "gpu_customization": gpu_customization,
+    }
+
+    if gpu_customization:
+        # Auto-detect specs if not provided
+        if gpu_customization_specs is None:
+            gpu_customization_specs = get_gpu_customization_specs()
+        gen_kwargs["gpu_customization_specs"] = gpu_customization_specs
+        print(f"  GPU optimization enabled with specs:")
+        for algo_key, algo_specs in gpu_customization_specs.items():
+            print(f"    {algo_key}: trials={algo_specs.get('num_trials')}, "
+                  f"batch=[{algo_specs.get('range_num_images_per_batch', [])!s}], "
+                  f"sw_batch=[{algo_specs.get('range_num_sw_batch_size', [])!s}]")
+
+    bundle_gen.generate(**gen_kwargs)
 
     history = bundle_gen.get_history()
     print(f"\nGenerated {len(history)} algorithm bundles:")
@@ -322,41 +408,7 @@ def run_full_pipeline(
     # Enable GPU customization for memory optimization
     # Auto-detect GPU VRAM and set per-algorithm ranges accordingly
     if gpu_customization:
-        import torch
-
-        gpu_mem_gb = 0
-        if torch.cuda.is_available():
-            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        print(f"  GPU memory detected: {gpu_mem_gb:.0f} GB")
-
-        if gpu_mem_gb >= 70:  # H100 (80GB) or similar
-            specs = {
-                "universal": {
-                    "num_trials": 5,
-                    "range_num_images_per_batch": [1, 8],
-                    "range_num_sw_batch_size": [1, 16],
-                },
-            }
-        else:  # L40S (48GB), A100 (40GB), etc.
-            specs = {
-                "segresnet": {
-                    "num_trials": 5,
-                    "range_num_images_per_batch": [1, 4],
-                    "range_num_sw_batch_size": [1, 8],
-                },
-                "swinunetr": {
-                    "num_trials": 5,
-                    "range_num_images_per_batch": [1, 2],
-                    "range_num_sw_batch_size": [1, 4],
-                },
-                # DiNTS NAS needs much more VRAM — keep very conservative
-                "dints": {
-                    "num_trials": 3,
-                    "range_num_images_per_batch": [1, 2],
-                    "range_num_sw_batch_size": [1, 2],
-                },
-            }
-
+        specs = get_gpu_customization_specs()
         runner.set_gpu_customization(
             gpu_customization=True,
             gpu_customization_specs=specs,
@@ -622,6 +674,7 @@ Examples:
             datastats_path=datastats_path,
             algos=args.algos,
             num_fold=args.num_fold,
+            gpu_customization=not args.no_gpu_customization,
         )
 
     elif args.mode == "train":

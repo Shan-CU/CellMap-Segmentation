@@ -5,9 +5,9 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=48
-#SBATCH --mem=256G
-#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=512G
+#SBATCH --time=06:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.err
 
@@ -31,8 +31,9 @@ cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 echo "Python: $(which python)"
 echo ""
 
-# Run conversion (workers=0 → auto-detect from CPU count)
-python auto3dseg/convert_zarr_to_nifti_v2.py --workers 0
+# Run conversion with 4 workers (proven stable — see git log a02490b)
+# 48 workers OOM'd at 1.3TB; each worker loads full zarr arrays (~27-75GB)
+python auto3dseg/convert_zarr_to_nifti_v2.py --workers 4
 
 echo ""
 echo "=== Done: $(date) ==="

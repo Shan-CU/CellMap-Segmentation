@@ -51,18 +51,18 @@ import zarr
 
 # All 47 tested classes, split into two sets:
 #
-# A) TRAINABLE classes (29 atomic leaf classes from zarr groundtruth)
-#    - These get integer labels 1..29 in the NIfTI
+# A) TRAINABLE classes (35 atomic leaf classes from zarr groundtruth)
+#    - These get integer labels 1..35 in the NIfTI
 #    - The model predicts these directly
 #
-# B) GROUP classes (18 composites)
+# B) GROUP classes (composites)
 #    - Composed at inference time by union of atomic predictions
 #    - NOT stored in NIfTI labels — zero training cost
 #
 # Why not train on groups directly? Because the zarr stores both the leaf
 # and the pre-composed group. Training on both would double-count voxels
 # (e.g., mito_mem voxels appear in both mito_mem channel AND mito channel).
-# Instead: predict 29 leaves → compose 18 groups → submit all 47.
+# Instead: predict 35 leaves → compose groups → submit all 48.
 #
 # Exception: "nuc" — the challenge defines nuc = union(ne_mem..nucleo), but
 # zarr stores "nuc" as a direct annotation that may differ from the union of
@@ -104,9 +104,12 @@ ATOMIC_CLASSES = [
     "mt_in",        # 30
     "perox_mem",    # 31
     "perox_lum",    # 32
+    "nhchrom",      # 33  — needed for chrom + nuc groups
+    "nechrom",      # 34  — needed for chrom + nuc groups
+    "nucleo",       # 35  — needed for nuc group
 ]
 
-NUM_CLASSES = len(ATOMIC_CLASSES)  # 32
+NUM_CLASSES = len(ATOMIC_CLASSES)  # 35
 CLASS_TO_ID = {name: idx + 1 for idx, name in enumerate(ATOMIC_CLASSES)}
 
 # Group classes composed at inference time via union of atomic predictions.
@@ -122,23 +125,25 @@ GROUP_CLASSES = {
     "perox":      ["perox_mem", "perox_lum"],
     "ne":         ["ne_mem", "ne_lum", "np_out", "np_in"],
     "np":         ["np_out", "np_in"],
-    "chrom":      ["hchrom", "echrom"],
+    "chrom":      ["hchrom", "nhchrom", "echrom", "nechrom"],
     "mt":         ["mt_out", "mt_in"],
     "er":         ["er_mem", "er_lum", "eres_mem", "eres_lum",
                    "ne_mem", "ne_lum", "np_out", "np_in"],
     "er_mem_all": ["er_mem", "eres_mem", "ne_mem"],
+    "ne_mem_all": ["ne_mem", "np_out", "np_in"],
     "cell":       ["pm", "mito_mem", "mito_lum", "mito_ribo",
                    "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
                    "endo_mem", "endo_lum", "lyso_mem", "lyso_lum",
                    "ld_mem", "ld_lum", "er_mem", "er_lum",
                    "eres_mem", "eres_lum", "ne_mem", "ne_lum",
-                   "np_out", "np_in", "hchrom", "echrom", "nucpl",
+                   "np_out", "np_in", "hchrom", "nhchrom",
+                   "echrom", "nechrom", "nucpl", "nucleo",
                    "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum"],
     # "nuc" is both a tested group AND an atomic zarr class — we train it
     # directly (ATOMIC_CLASSES[13]), so no group composition needed.
 }
 
-# 47 tested classes for reference
+# 48 tested classes (from tested_classes.csv)
 TESTED_CLASSES = [
     "ecs", "pm", "mito_mem", "mito_lum", "mito_ribo",
     "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
@@ -150,7 +155,7 @@ TESTED_CLASSES = [
     "nuc", "golgi", "ves", "endo", "lyso", "ld", "eres",
     "perox_mem", "perox_lum", "perox",
     "mito", "er", "ne", "np", "chrom", "mt",
-    "cell", "er_mem_all",
+    "cell", "er_mem_all", "ne_mem_all",
 ]
 
 
@@ -182,17 +187,125 @@ def get_zarr_array(zarr_path: str, class_name: str, crop_name: str) -> np.ndarra
     return None
 
 
-def get_em_array(zarr_path: str) -> np.ndarray | None:
-    """Load EM (fibsem-uint8) array at s0 resolution."""
+def _get_crop_offset_and_shape(zarr_path: str, crop_name: str) -> tuple[list[int] | None, tuple[int, ...] | None, str]:
+    """Get the voxel offset and shape of a crop by reading zarr metadata.
+
+    Reads the first available class label array to determine the crop's
+    spatial extent and its coordinate-transform offset relative to the
+    full EM volume.  Returns (voxel_offset, label_shape, scale_key).
+    """
+    gt_base = os.path.join(zarr_path, "recon-1", "labels", "groundtruth", crop_name)
     em_base = os.path.join(zarr_path, "recon-1", "em", "fibsem-uint8")
-    for scale in ["s0", "s1"]:
-        scale_path = os.path.join(em_base, scale)
-        if os.path.isdir(scale_path):
+    if not os.path.isdir(gt_base):
+        return None, None, "s0"
+
+    # Find first available class to read metadata from
+    for cls_name in ATOMIC_CLASSES:
+        cls_dir = os.path.join(gt_base, cls_name)
+        if not os.path.isdir(cls_dir):
+            continue
+        for scale in ["s0", "s1", "s2"]:
+            scale_path = os.path.join(cls_dir, scale)
+            if not os.path.isdir(scale_path):
+                continue
             try:
                 arr = zarr.open(scale_path, mode="r")
-                return np.asarray(arr)
+                label_shape = arr.shape
+                if arr.size == 0:
+                    continue
+
+                # Parse coordinate transforms from .zattrs
+                label_translation = None
+                label_scale_vals = None
+                raw_scale_vals = None
+
+                # Label metadata
+                label_group = zarr.open(cls_dir, mode="r")
+                if hasattr(label_group, "attrs") and "multiscales" in label_group.attrs:
+                    ms = label_group.attrs["multiscales"]
+                    if isinstance(ms, list) and len(ms) > 0:
+                        for ds in ms[0].get("datasets", []):
+                            if ds.get("path") == scale:
+                                for t in ds.get("coordinateTransformations", []):
+                                    if t.get("type") == "translation":
+                                        label_translation = t["translation"]
+                                    elif t.get("type") == "scale":
+                                        label_scale_vals = t["scale"]
+
+                # Raw EM metadata
+                em_group_path = os.path.join(em_base)
+                if os.path.isdir(em_group_path):
+                    em_group = zarr.open(em_group_path, mode="r")
+                    if hasattr(em_group, "attrs") and "multiscales" in em_group.attrs:
+                        ms = em_group.attrs["multiscales"]
+                        if isinstance(ms, list) and len(ms) > 0:
+                            for ds in ms[0].get("datasets", []):
+                                if ds.get("path") == scale:
+                                    for t in ds.get("coordinateTransformations", []):
+                                        if t.get("type") == "scale":
+                                            raw_scale_vals = t["scale"]
+
+                if label_translation and raw_scale_vals:
+                    voxel_offset = [
+                        int(round(label_translation[i] / raw_scale_vals[i]))
+                        for i in range(len(raw_scale_vals))
+                    ]
+                    return voxel_offset, label_shape, scale
+
+                # Fallback: no offset metadata, return None offset
+                return None, label_shape, scale
             except Exception:
                 continue
+
+    return None, None, "s0"
+
+
+def get_em_region(zarr_path: str, voxel_offset: list[int] | None,
+                  crop_shape: tuple[int, ...], scale: str = "s0") -> np.ndarray | None:
+    """Load only the EM region corresponding to a label crop.
+
+    If voxel_offset is available, slices the full EM array (zero-copy from zarr).
+    Falls back to reading from origin if offset is unknown.
+    """
+    em_base = os.path.join(zarr_path, "recon-1", "em", "fibsem-uint8")
+    # Try requested scale first, then fallback
+    scales_to_try = [scale] + [s for s in ["s0", "s1"] if s != scale]
+    for sc in scales_to_try:
+        scale_path = os.path.join(em_base, sc)
+        if not os.path.isdir(scale_path):
+            continue
+        try:
+            arr = zarr.open(scale_path, mode="r")
+            if voxel_offset is not None:
+                slices = tuple(
+                    slice(voxel_offset[i], voxel_offset[i] + crop_shape[i])
+                    for i in range(len(crop_shape))
+                )
+                # Bounds check
+                valid = all(
+                    voxel_offset[i] >= 0
+                    and voxel_offset[i] + crop_shape[i] <= arr.shape[i]
+                    for i in range(len(crop_shape))
+                )
+                if valid:
+                    return np.array(arr[slices])
+                else:
+                    # Offset out of bounds — fall through to origin slice
+                    pass
+
+            # Fallback: read from origin (same as label array indices)
+            slices = tuple(slice(0, min(s, arr.shape[i]))
+                           for i, s in enumerate(crop_shape))
+            data = np.array(arr[slices])
+            # Pad if raw is smaller than label
+            if data.shape != crop_shape:
+                padded = np.zeros(crop_shape, dtype=data.dtype)
+                pad_slices = tuple(slice(0, s) for s in data.shape)
+                padded[pad_slices] = data
+                return padded
+            return data
+        except Exception:
+            continue
     return None
 
 
@@ -242,13 +355,19 @@ def convert_one_crop(
             "shape": [],
         }
 
-    # Load EM
-    em_data = get_em_array(zarr_path)
+    # Determine crop spatial extent from label metadata
+    voxel_offset, label_shape, scale = _get_crop_offset_and_shape(zarr_path, crop_name)
+    if label_shape is None:
+        print(f"  SKIP {crop_id}: no label data found")
+        return None
+
+    shape = label_shape  # (Z, Y, X) — authoritative from label array
+
+    # Load only the EM region corresponding to this crop (NOT the full volume)
+    em_data = get_em_region(zarr_path, voxel_offset, shape, scale)
     if em_data is None:
         print(f"  SKIP {crop_id}: no EM data")
         return None
-
-    shape = em_data.shape  # (Z, Y, X)
 
     # Build integer label volume
     label_vol = np.zeros(shape, dtype=np.uint8)
@@ -467,19 +586,28 @@ def main():
     # Run conversions in parallel
     t0 = time.time()
     results = []
+    total = len(jobs)
 
     if args.workers <= 1:
-        for job in jobs:
+        for i, job in enumerate(jobs, 1):
             r = _convert_wrapper(job)
             if r is not None:
                 results.append(r)
+            status = r.get("status", "error") if r else "error"
+            print(f"  [{i}/{total}] {job[0]}_{job[1]} — {status}", flush=True)
     else:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futures = {pool.submit(_convert_wrapper, job): job for job in jobs}
+            done_count = 0
             for future in as_completed(futures):
+                done_count += 1
                 r = future.result()
+                job = futures[future]
+                crop_id = f"{job[0]}_{job[1]}"
+                status = r.get("status", "error") if r else "error"
                 if r is not None:
                     results.append(r)
+                print(f"  [{done_count}/{total}] {crop_id} — {status}", flush=True)
 
     elapsed = time.time() - t0
     n_converted = sum(1 for r in results if r.get("status") == "converted")

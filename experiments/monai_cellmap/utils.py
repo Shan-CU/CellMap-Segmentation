@@ -189,6 +189,7 @@ def save_checkpoint(
     output_dir: str,
     is_best: bool = False,
     save_weights_only: bool = False,
+    **kwargs,
 ) -> None:
     """Save training checkpoint.
 
@@ -202,6 +203,7 @@ def save_checkpoint(
         output_dir: Directory to save to.
         is_best: Whether this is the best model so far.
         save_weights_only: If True, only save model weights.
+        save_every_n_epochs: If > 0, save epoch checkpoint every N epochs.
     """
     if not is_main_process():
         return
@@ -236,9 +238,11 @@ def save_checkpoint(
         best_path = os.path.join(output_dir, "checkpoint_best.pth")
         torch.save(checkpoint, best_path)
 
-    # Epoch checkpoint
-    epoch_path = os.path.join(output_dir, f"checkpoint_epoch{epoch:04d}.pth")
-    torch.save(checkpoint, epoch_path)
+    # Periodic epoch checkpoint (only every N epochs to save disk)
+    save_every = kwargs.get("save_every_n_epochs", 0)
+    if save_every > 0 and (epoch + 1) % save_every == 0:
+        epoch_path = os.path.join(output_dir, f"checkpoint_epoch{epoch:04d}.pth")
+        torch.save(checkpoint, epoch_path)
 
 
 def load_checkpoint(

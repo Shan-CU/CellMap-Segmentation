@@ -499,3 +499,42 @@ experiments/monai_cellmap/
 | SegResNet | 192³ | 2 | 2 | Cosine warm restarts | Per-class |
 | FlexUNet | 192³ | 3 | 2 | Cosine warm restarts | Per-class |
 | SwinUNETR | 128³ | 2 | 2 | Cosine warm restarts + pretrained | Per-class |
+
+---
+
+## 17. Auto3DSeg v2 — Optimized Launch (Feb 17)
+
+### Diagnosis of v1 Failures
+Previous Auto3DSeg attempts (jobs 30266729–30463620) all crashed due to:
+1. **Outlier crop**: `jrc_cos7-1a_crop247` — 8.2GB compressed, shape 1796×1500×2400 = 25.9GB as float32.
+   Not properly cropped during Zarr→NIfTI conversion. Has `annotated_classes: ""` (no annotations).
+2. **DiNTS search phase**: Uses `cache_rate: 1` (100% dataset cached in RAM). With the 25.9GB outlier
+   and 7 DDP ranks, RAM usage would exceed ~1TB.
+3. **Stale datastats.yaml**: Generated with outlier included, so auto-computed roi_size/batch_size
+   were skewed by the 1796×1500×2400 shape.
+
+### v2 Fixes Applied
+1. **Removed outlier**: `jrc_cos7-1a_crop247` removed from `datalist.json` (230 train, 46 val)
+2. **Fresh data analysis**: Step 0 deletes stale `datastats.yaml` and re-runs DataAnalyzer
+3. **GPU optimization**: Added `get_gpu_customization_specs()` to `run_auto3dseg.py`:
+   - MONAI BundleGen now runs random-search trials on actual GPU to find optimal batch sizes
+   - L40S 48GB specs: SegResNet batch [1,6] / sw_batch [1,12], SwinUNETR [1,4]/[1,8], DiNTS [1,2]/[1,4]
+   - Replaces hardcoded conservative values with empirically determined optimal ones
+4. **Clean state**: Stale `progress.yaml`, `cache.yaml` removed before each step
+5. **Config validation**: Post-generation summary prints roi_size, batch_size, epochs per algorithm
+6. **8 GPUs**: Uses all L40S GPUs for DDP training (vs 7 in v1)
+
+### Job Details
+- **Job ID**: 31252136 (`auto3dseg_v2`)
+- **Dependency**: `afterany:31119803` (waits for inference job to finish)
+- **Node**: g181003 (8× L40S 48GB)
+- **Wall time**: 6 days (reservation expires Feb 23)
+- **Pipeline**: analyze → generate (GPU opt) → patch → train (3 algos × 1 fold)
+- **Expected algorithms**: SegResNet, SwinUNETR, DiNTS (each auto-computed epochs)
+
+### Key File Changes
+- `auto3dseg/nifti_data/datalist.json`: Removed crop247 outlier (231→230 training)
+- `auto3dseg/run_auto3dseg.py`: Added `get_gpu_customization_specs()` shared helper,
+  wired `gpu_customization_specs` through `run_bundle_generation()` and `run_full_pipeline()`
+- `auto3dseg/auto3dseg_train_reserved.sbatch`: Complete rewrite with 4-step pipeline,
+  GPU optimization, outlier sanity check, config summary debugging
