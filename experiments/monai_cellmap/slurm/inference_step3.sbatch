@@ -6,9 +6,9 @@
 #SBATCH --qos=gpu_access
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:3
-#SBATCH --mem=200g
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
+#SBATCH --mem=150g
 #SBATCH --time=1-00:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/infer_step3_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/infer_step3_%j.err
