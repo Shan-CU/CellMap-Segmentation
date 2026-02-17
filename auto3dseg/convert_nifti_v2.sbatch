@@ -35,7 +35,7 @@ echo "Python: $(which python)"
 echo ""
 
 # Run conversion with 16 workers
-python auto3dseg/convert_zarr_to_nifti_v2.py --workers 8
+python auto3dseg/convert_zarr_to_nifti_v2.py --workers 16
 
 echo ""
 echo "=== Done: $(date) ==="
