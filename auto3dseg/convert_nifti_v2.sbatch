@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=convert_nifti_v2
-#SBATCH --partition=batch
-#SBATCH --account=rc_cburch_pi
+#SBATCH --partition=sycamore
+#SBATCH --account=rc_alain_pi
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
