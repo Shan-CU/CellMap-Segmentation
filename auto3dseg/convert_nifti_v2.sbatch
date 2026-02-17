@@ -6,8 +6,8 @@
 #SBATCH --qos=gpu_access
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=20
-#SBATCH --mem=64g
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=100g
 #SBATCH --gres=gpu:1
 #SBATCH --time=01:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.out
@@ -35,7 +35,7 @@ echo "Python: $(which python)"
 echo ""
 
 # Run conversion with 16 workers
-python auto3dseg/convert_zarr_to_nifti_v2.py --workers 16
+python auto3dseg/convert_zarr_to_nifti_v2.py --workers 8
 
 echo ""
 echo "=== Done: $(date) ==="
