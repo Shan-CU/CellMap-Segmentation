@@ -429,6 +429,11 @@ def main():
     os.makedirs(images_dir, exist_ok=True)
     os.makedirs(labels_dir, exist_ok=True)
 
+    # Auto-detect workers from CPU count (like v1 converter)
+    if args.workers == 0:
+        import multiprocessing
+        args.workers = min(64, multiprocessing.cpu_count())
+
     print(f"CellMap Zarr → NIfTI v2 Converter")
     print(f"  Data dir:    {data_dir}")
     print(f"  Output dir:  {output_dir}")

@@ -1,18 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=convert_nifti_v2
-#SBATCH --partition=l40-gpu
-#SBATCH --reservation=gsgeorge_9034
+#SBATCH --partition=batch
 #SBATCH --account=rc_cburch_pi
-#SBATCH --qos=gpu_access
+#SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=750g
-#SBATCH --gres=gpu:1
-#SBATCH --time=03:00:00
+#SBATCH --cpus-per-task=48
+#SBATCH --mem=256G
+#SBATCH --time=04:00:00
 #SBATCH --output=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.out
 #SBATCH --error=/work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/logs/convert_nifti_v2_%j.err
-#SBATCH --nodelist=g181003
 
 set -euo pipefail
 
@@ -34,8 +31,8 @@ cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 echo "Python: $(which python)"
 echo ""
 
-# Run conversion with 16 workers
-python auto3dseg/convert_zarr_to_nifti_v2.py --workers 4
+# Run conversion (workers=0 → auto-detect from CPU count)
+python auto3dseg/convert_zarr_to_nifti_v2.py --workers 0
 
 echo ""
 echo "=== Done: $(date) ==="
