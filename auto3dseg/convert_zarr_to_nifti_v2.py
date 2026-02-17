@@ -29,6 +29,7 @@ Requires: zarr, nibabel, numpy
 from __future__ import annotations
 
 import argparse
+import gc
 import csv
 import json
 import os
@@ -290,6 +291,10 @@ def convert_one_crop(
 
     lbl_nii = nib.Nifti1Image(label_vol, affine)
     nib.save(lbl_nii, lbl_out)
+
+    # Free large arrays before returning
+    del em_data, label_vol, em_nii, lbl_nii
+    gc.collect()
 
     size_mb = (os.path.getsize(img_out) + os.path.getsize(lbl_out)) / (1024 * 1024)
     print(f"  OK {crop_id}: shape={shape}, classes={len(annotated_indices)}/{NUM_CLASSES} "
