@@ -55,13 +55,22 @@ cfg.grad_accumulation = 1
 cfg.clip_grad = 1.0
 cfg.seed = 42
 
-# === Loss (Per-class Tversky + Balanced Softmax online weighting) ===
+# === Loss (Per-class Tversky + Balanced Softmax online weighting + spatial bbox masking) ===
 cfg.loss_type = "balanced_softmax_tversky"  # BalancedSoftmaxTverskyLoss
 cfg.tversky_alpha = 0.6   # FP penalty weight — experimentally validated winner
                           # loss_optimization exp: α=0.6/β=0.4 → Dice 0.370, α=0.3/β=0.7 → 0.028 (collapsed)
 cfg.tversky_beta = 0.4    # FN penalty weight — precision-biased works better with partial annotations
 cfg.tau = 1.0             # Balanced Softmax temperature
 cfg.update_interval = 50  # steps between frequency re-estimates
+
+# Spatial masking: box_class_mask_tight (masking_strategies experiment winner)
+# Eval Dice: 0.376 (+55% over no_mask baseline 0.243)
+# Computes per-class 3D bounding box around foreground voxels, pads by 5%,
+# weights voxels inside bbox at 1.0, outside at 0.05 (strong de-weighting).
+# CRITICAL: prevents degenerate mode where model predicts everything positive
+# (the failure mode observed in R2 — all models had mode collapse).
+cfg.bbox_pad_fraction = 0.05  # fraction of bbox extent to pad
+cfg.bbox_bg_weight = 0.05    # weight for voxels outside all class bboxes
 
 # === Augmentation (Mixup) ===
 cfg.mixup_p = 0.0  # disabled by default (Round 2: Mixup dilutes unannotated channels)

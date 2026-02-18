@@ -20,7 +20,7 @@ from copy import deepcopy
 from common_config import basic_cfg
 
 cfg = deepcopy(basic_cfg)
-cfg.name = "segresnet_wide_r2"
+cfg.name = "segresnet_wide_r3"
 cfg.output_dir = f"/work/users/g/s/gsgeorge/cellmap/runs/monai_cellmap/{cfg.name}"
 
 # --- Model ---

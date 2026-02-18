@@ -4,16 +4,24 @@ Partial Annotation Loss for CellMap segmentation.
 Loss functions:
 - PartialTverskyLoss: Per-channel Tversky (α=0.6, β=0.4) with annotation masking
 - BalancedSoftmaxTverskyLoss: Logit-adjusted Tversky with online frequency estimation,
-  annotation-mask-aware accumulation, and partial annotation masking
+  annotation-mask-aware accumulation, partial annotation masking, AND per-class
+  bounding-box spatial masking (box_class_mask_tight)
 - PartialAnnotationDeepSupervisionLoss: Multi-scale wrapper for deep supervision
 
-Based on results from two prior experiments:
+Based on results from THREE prior experiments:
 - loss_optimization: Per-class Tversky (α=0.6, β=0.4) was the best base loss
 - class_weighting: Balanced Softmax τ=1.0 was the best weighting strategy (0.5711 mean Dice)
+- masking_strategies: box_class_mask_tight was the best masking strategy (0.376 eval Dice,
+  +55% over no_mask baseline of 0.243). It computes per-class 3D bounding boxes around
+  annotated foreground, applies full weight inside bbox (+ 5% padding), and bg_weight=0.05
+  outside. This provides a proper negative signal in annotated regions while de-weighting
+  predictions far from any annotation — preventing the model from learning to predict
+  everything as positive (the degenerate mode seen in R2).
 
 Adapted from:
 - auto3dseg/partial_annotation.py (partial annotation handling)
 - experiments/class_weighting/losses_class_weighting.py (Tversky + Balanced Softmax)
+- experiments/masking_strategies/masking_losses.py (BoxClassMaskTverskyLoss)
 """
 
 from __future__ import annotations
@@ -117,7 +125,7 @@ class PartialTverskyLoss(nn.Module):
 
 
 class BalancedSoftmaxTverskyLoss(nn.Module):
-    """Logit-adjusted Tversky loss with partial annotation masking.
+    """Logit-adjusted Tversky loss with partial annotation + spatial bbox masking.
 
     Shifts logits by a class-frequency prior before applying sigmoid in the
     Tversky computation. Rare classes get a positive offset → sigmoid biased
@@ -128,10 +136,17 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
     The winning weighting strategy from class_weighting experiment (τ=1.0,
     mean Dice 0.5711, beating inverse-frequency, CB loss, and Seesaw).
 
-    Frequency estimation is done online: accumulates positive voxel counts
-    during training, recomputes adjustments every `update_interval` batches.
-    **Annotation-mask-aware**: only counts voxels from annotated channels,
-    preventing unannotated all-zero channels from biasing estimates.
+    **Spatial bbox masking (box_class_mask_tight)**:
+    For each annotated class, computes the 3D bounding box of foreground
+    voxels, pads it by `bbox_pad_fraction` of the bbox size, and creates a
+    spatial weight mask: 1.0 inside the padded bbox, `bbox_bg_weight` outside.
+    Unannotated channels get a spatial mask of 0 (no loss contribution).
+    This prevents the degenerate mode where the model predicts everything
+    positive because there's no spatial false-positive penalty outside
+    annotated foreground regions.
+
+    Results from masking_strategies experiment:
+        box_class_mask_tight (pad=0.05, bg=0.05): 0.376 eval Dice (+55% vs no_mask)
 
     Args:
         tau: Temperature for logit adjustment. Default 1.0 (theory-optimal).
@@ -140,6 +155,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         smooth: Smoothing for Tversky. Default 1e-6.
         num_classes: Number of output classes.
         update_interval: Recompute adjustments every N batches. Default 50.
+        bbox_pad_fraction: Fraction of bbox size to pad. Default 0.05.
+        bbox_bg_weight: Weight for voxels outside all class bboxes. Default 0.05.
     """
 
     def __init__(
@@ -150,6 +167,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         smooth: float = 1e-6,
         num_classes: int = 35,
         update_interval: int = 50,
+        bbox_pad_fraction: float = 0.05,
+        bbox_bg_weight: float = 0.05,
     ) -> None:
         super().__init__()
         self.tau = tau
@@ -158,6 +177,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         self.smooth = smooth
         self.num_classes = num_classes
         self.update_interval = update_interval
+        self.bbox_pad_fraction = bbox_pad_fraction
+        self.bbox_bg_weight = bbox_bg_weight
         self._annotation_mask: Optional[torch.Tensor] = None
 
         # Online frequency estimation buffers
@@ -217,8 +238,85 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
                 self._compute_adjustments(self._accum_counts, self.tau)
             )
 
+    def _compute_spatial_mask(
+        self,
+        target: torch.Tensor,
+        annotation_mask: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        """Compute per-class 3D bounding-box spatial weight mask.
+
+        For each annotated class in each sample:
+        1. Find bounding box of foreground voxels in (D, H, W)
+        2. Pad bbox by bbox_pad_fraction of its size in each dimension
+        3. Set voxels inside padded bbox to 1.0, outside to bbox_bg_weight
+        4. Multiply by annotation mask (unannotated channels → all zeros)
+
+        For annotated classes with NO foreground voxels in this crop:
+        - bbox_bg_weight everywhere → model IS penalised for any positive
+          predictions, providing proper negative signal.
+
+        Args:
+            target: (B, C, *spatial) binary ground truth.
+            annotation_mask: (B, C) annotation mask, or None.
+
+        Returns:
+            (B, C, *spatial) spatial weight mask.
+        """
+        B, C = target.shape[:2]
+        spatial_shape = target.shape[2:]  # (D, H, W) or (H, W)
+        ndim_spatial = len(spatial_shape)
+        device = target.device
+
+        # Start with bg_weight everywhere
+        spatial_mask = torch.full(
+            (B, C, *spatial_shape), self.bbox_bg_weight,
+            device=device, dtype=target.dtype,
+        )
+
+        for b in range(B):
+            for c in range(C):
+                # Skip unannotated channels
+                if annotation_mask is not None:
+                    if annotation_mask[b, c] < 0.5:
+                        spatial_mask[b, c] = 0.0
+                        continue
+
+                # Find foreground voxels for this sample and class
+                pos = target[b, c] > 0.5
+                if not pos.any():
+                    # Annotated but no foreground → bg_weight everywhere
+                    # (already set by default). Provides negative-only signal.
+                    continue
+
+                # Compute bounding box in each spatial dimension
+                coords = torch.where(pos)  # tuple of (D_indices, H_indices, W_indices)
+
+                slices = []
+                for dim_idx in range(ndim_spatial):
+                    dim_coords = coords[dim_idx]
+                    lo = dim_coords.min().item()
+                    hi = dim_coords.max().item()
+
+                    # Pad by fraction of bbox extent
+                    extent = hi - lo + 1
+                    pad = max(1, int(extent * self.bbox_pad_fraction))
+                    lo = max(0, lo - pad)
+                    hi = min(spatial_shape[dim_idx] - 1, hi + pad)
+                    slices.append(slice(lo, hi + 1))
+
+                # Set inside padded bbox to 1.0
+                spatial_mask[b, c][tuple(slices)] = 1.0
+
+        return spatial_mask
+
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Compute logit-adjusted Tversky loss with annotation masking.
+        """Compute logit-adjusted Tversky loss with spatial bbox masking.
+
+        The spatial mask weights TP/FP/FN per-voxel before summing over
+        spatial dimensions. This means:
+        - Inside padded bbox: full contribution (weight=1.0)
+        - Outside bbox: reduced contribution (weight=bbox_bg_weight=0.05)
+        - Unannotated channels: zero contribution (weight=0.0)
 
         Args:
             input: Logits (B, C, *spatial).
@@ -236,25 +334,30 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         if self.training:
             self._accumulate(target, mask)
 
+        # Compute spatial bbox mask: (B, C, *spatial)
+        spatial_w = self._compute_spatial_mask(target, mask)
+
         # Apply logit adjustment per channel
-        # logit_adj shape (C,) → broadcast to (1, C, 1, 1, 1)
         adj = self.logit_adj.to(input.device)
         adj_shape = [1, self.num_classes] + [1] * (input.ndim - 2)
         adjusted_input = input - adj.view(*adj_shape)
 
-        # Tversky with adjusted logits
+        # Tversky with spatial weighting
         pred = torch.sigmoid(adjusted_input)
         spatial_dims = tuple(range(2, input.ndim))
 
-        tp = (pred * target).sum(dim=spatial_dims)          # (B, C)
-        fp = (pred * (1.0 - target)).sum(dim=spatial_dims)  # (B, C)
-        fn = ((1.0 - pred) * target).sum(dim=spatial_dims)  # (B, C)
+        # Spatially weighted TP/FP/FN
+        tp = (spatial_w * pred * target).sum(dim=spatial_dims)                  # (B, C)
+        fp = (spatial_w * pred * (1.0 - target)).sum(dim=spatial_dims)          # (B, C)
+        fn = (spatial_w * (1.0 - pred) * target).sum(dim=spatial_dims)          # (B, C)
 
         denom = tp + self.alpha * fp + self.beta * fn + self.smooth
         tversky = (tp + self.smooth) / denom.clamp(min=self.smooth)
         per_channel_loss = 1.0 - tversky  # (B, C)
 
-        # Apply annotation mask
+        # Average over annotated channels only (spatial mask already zeros
+        # out unannotated channels, but we still need to divide by the
+        # correct count of annotated channels per sample)
         if mask is not None:
             mask = mask.to(input.device)
             per_channel_loss = per_channel_loss * mask
@@ -338,6 +441,9 @@ def build_partial_annotation_loss(
     # Balanced Softmax parameters
     tau: float = 1.0,
     update_interval: int = 50,
+    # Spatial bbox masking parameters (box_class_mask_tight)
+    bbox_pad_fraction: float = 0.05,
+    bbox_bg_weight: float = 0.05,
     # Deep supervision
     deep_supervision: bool = False,
     ds_weights: Optional[List[float]] = None,
@@ -352,6 +458,8 @@ def build_partial_annotation_loss(
         smooth: Tversky smoothing.
         tau: Balanced Softmax temperature (1.0 = theory-optimal).
         update_interval: Batches between logit adjustment updates.
+        bbox_pad_fraction: Fraction of bbox to pad (0.05 = tight).
+        bbox_bg_weight: Weight outside bbox (0.05 = strongly de-weighted).
         deep_supervision: Wrap with multi-scale DS loss.
         ds_weights: Per-level weights for deep supervision.
 
@@ -366,6 +474,8 @@ def build_partial_annotation_loss(
             smooth=smooth,
             num_classes=num_classes,
             update_interval=update_interval,
+            bbox_pad_fraction=bbox_pad_fraction,
+            bbox_bg_weight=bbox_bg_weight,
         )
     elif loss_type == "tversky":
         base = PartialTverskyLoss(

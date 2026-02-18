@@ -12,7 +12,7 @@ from copy import deepcopy
 from common_config import basic_cfg
 
 cfg = deepcopy(basic_cfg)
-cfg.name = "flexunet_resnet34_r2"
+cfg.name = "flexunet_resnet34_r3"
 cfg.output_dir = f"/work/users/g/s/gsgeorge/cellmap/runs/monai_cellmap/{cfg.name}"
 
 # --- Model ---

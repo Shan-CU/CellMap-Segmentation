@@ -2,7 +2,7 @@
 
 > **Last updated:** February 18, 2026  
 > **Authors:** CellMap Segmentation Team  
-> **Status:** Round 2 training in progress on Sycamore (H100) + Longleaf (L40S)
+> **Status:** Round 2 failed (mode collapse); Round 3 fix implemented, awaiting submission
 
 ---
 
@@ -17,6 +17,7 @@
 7. [Cross-Experiment Progression](#7-cross-experiment-progression)
 8. [Key Takeaways & Recommendations](#8-key-takeaways--recommendations)
 9. [Hardware & Compute Summary](#9-hardware--compute-summary)
+10. [Round 3 Fix: Spatial Bbox Masking for 3D Models](#10-round-3-fix-spatial-bbox-masking-for-3d-models)
 
 ---
 
@@ -44,7 +45,13 @@ Model Comparison (4 architectures × 2D/3D)
   → 2D Winner: ResNet 2D (14-class eval Dice = 0.410)
   → 3D Winner: FlexibleUNet-ResNet34 (Dice = 0.233)
       ↓
-MONAI 3D Round 2 (35 classes, 4 models) → In Progress
+MONAI 3D Round 2 (35 classes, 4 models) → FAILED (mode collapse)
+  → All 4 models predicted ~1.0 for most classes everywhere
+  → Root cause: no spatial masking in loss function
+      ↓
+MONAI 3D Round 3 (35 classes, 4 models) → Awaiting Submission
+  → Fix: box_class_mask_tight spatial masking (pad=0.05, bg=0.05)
+  → Adapted from 2D masking experiment winner (+55% over no_mask)
 ```
 
 ### Winners by Category
@@ -587,4 +594,178 @@ post_processing: TTA (flip + rotate) + connected component filtering
 
 ---
 
-*This document will be updated as Round 2 results become available.*
+## 10. Round 3 Fix: Spatial Bbox Masking for 3D Models
+
+> **Date:** February 18, 2026  
+> **Status:** Implementation complete, awaiting job submission
+
+### 10.1 Problem: Catastrophic Mode Collapse in Round 2
+
+All four R2 3D models exhibited **catastrophic mode collapse** — they learned to predict probability ≈1.0 for nearly every class at every voxel, producing meaningless segmentations.
+
+#### Symptoms Observed
+
+| Model | Observed Behavior | "Best" Val Dice | Reality |
+|-------|------------------|----------------|---------|
+| SwinUNETR | Predicts only cytoplasm (class 29) everywhere | 0.1413 | Single-class collapse |
+| FlexUNet-ResNet34 | Predicts ecs + hchrom everywhere | 0.1524 | Near-zero Dice on all classes |
+| SegResNet (32f) | Same degenerate pattern | ~0.15 | Mode collapse |
+| SegResNet-Wide (48f) | Same degenerate pattern | ~0.15 | Mode collapse |
+
+#### Raw Probability Analysis (FlexUNet on kidney crop)
+
+Inspecting raw sigmoid outputs on `jrc_mus-kidney` (200³ crop):
+- **22 of 35 classes** had mean probability > 0.3 across the entire volume
+- Many classes had mean probability ≈ 1.0 (predicting "yes" everywhere)
+- Only 2 classes (mito_ribo, np_out) had low mean probability
+- The model learned to predict everything as positive
+
+#### Visualization Evidence
+
+Ran `visualize_prediction.py` on 3 test crops (kidney, heart, liver-zon-1):
+- SwinUNETR: uniform cyan predictions (cytoplasm only), no organelle structure visible
+- FlexUNet: uniform predictions for ecs/hchrom, no spatial structure
+
+### 10.2 Root Cause Analysis
+
+The R2 loss function (`BalancedSoftmaxTverskyLoss`) had **channel-level annotation masking only** — it masked unannotated channels (shape `(B, C)`) but had **no spatial masking**.
+
+#### Why This Causes Mode Collapse
+
+```
+CellMap partial annotations:
+├── annotation_mask[c] = 0  →  channel c is unannotated → loss = 0 (correct)
+└── annotation_mask[c] = 1  →  channel c is annotated
+     ├── target[c] = 1 at annotated foreground voxels (sparse, small regions)
+     └── target[c] = 0 EVERYWHERE ELSE (vast majority of the volume)
+          ├── Includes genuinely background voxels (correct negative)
+          └── Includes spatially unannotated regions (NOT true negatives!)
+              → Model penalized for predicting these → learns to predict 0
+              → BUT: positive voxels are so sparse that predicting 1 everywhere
+                 gives partial credit (some TPs) with minimal FN penalty
+              → Net effect: model finds it optimal to predict ~1.0 everywhere
+```
+
+The core issue: within an "annotated" channel, the target is 0 both for **true background** and for **spatially unannotated regions** (where we simply don't know). The model can't distinguish these cases, and with α=0.6 (precision bias), the FP penalty on the vast background is diluted by the sheer volume of "background" voxels relative to the tiny foreground annotations.
+
+### 10.3 The Fix: `box_class_mask_tight` Spatial Masking (3D)
+
+Adapted from the winning masking strategy in Experiment 3 (2D masking_strategies), which achieved **+55% improvement** over no_mask baseline (0.243 → 0.376 on 13-dataset evaluation).
+
+#### How It Works
+
+For each annotated class in each sample:
+
+1. **Find the 3D bounding box** of all foreground voxels in `(D, H, W)`
+2. **Pad the bbox** by `pad_fraction=0.05` (5%) of its extent in each dimension (minimum 1 voxel)
+3. **Create spatial weight mask**:
+   - Inside padded bbox → weight = **1.0** (full loss contribution)
+   - Outside padded bbox → weight = **0.05** (strongly de-weighted, ~20× less)
+   - Unannotated channels → weight = **0.0** (no loss contribution)
+4. **Annotated class with NO foreground** → `bg_weight=0.05` everywhere (provides proper negative-only signal — model IS penalized for any positive predictions)
+
+#### Effect on Tversky Computation
+
+```python
+# R2 (broken): unweighted spatial sum → FP penalty diluted over entire volume
+tp = (pred * target).sum(spatial_dims)
+fp = (pred * (1 - target)).sum(spatial_dims)      # dominated by vast background
+fn = ((1 - pred) * target).sum(spatial_dims)
+
+# R3 (fixed): spatially weighted → FP penalty concentrated near annotations
+tp = (spatial_w * pred * target).sum(spatial_dims)
+fp = (spatial_w * pred * (1 - target)).sum(spatial_dims)  # bg outside bbox ×0.05
+fn = (spatial_w * (1 - pred) * target).sum(spatial_dims)
+```
+
+This means false positives **near annotations** (inside the bbox) are penalized at full strength, while predictions **far from any annotation** are de-weighted to 5%. The model gets a strong negative signal where annotations exist, without being overwhelmed by the vast unlabeled background.
+
+#### Why `box_class_mask_tight` (Not `masksup_r0.3`)
+
+Although `masksup_r0.3` was the #1 strategy **after the foreground masking fix** (§4.4), `box_class_mask_tight` was chosen for R3 because:
+
+1. **`masksup_r0.3` requires random input masking** — reconstructing masked patches is a 2D-specific technique that doesn't translate cleanly to 3D volumetric training
+2. **`box_class_mask_tight` was #1 before the foreground fix** (0.376 vs 0.243 baseline, +55%) — it was directly solving the spatial masking problem that R2 models suffer from
+3. **Rankings shifted because the foreground fix addressed the same underlying issue** — black-padding FPs were a spatial masking problem. With proper 3D handling, bbox masking targets the remaining issue (unannotated spatial regions within annotated channels)
+4. **Simple, interpretable, no extra hyperparameters** beyond `pad_fraction` and `bg_weight` which are well-validated from 2D experiments
+
+### 10.4 Files Modified
+
+| File | Change |
+|------|--------|
+| `experiments/monai_cellmap/losses/partial_annotation.py` | Added `_compute_spatial_mask()` method to `BalancedSoftmaxTverskyLoss`. Modified `forward()` to compute 3D per-class bounding-box spatial weight mask and apply it to TP/FP/FN computation. Added `bbox_pad_fraction` and `bbox_bg_weight` constructor params. Updated `build_partial_annotation_loss()` factory to pass new params. |
+| `experiments/monai_cellmap/models/mdl_cellmap.py` | Updated `build_partial_annotation_loss()` call in `Net.__init__()` to pass `bbox_pad_fraction` and `bbox_bg_weight` from config. |
+| `experiments/monai_cellmap/configs/common_config.py` | Added `cfg.bbox_pad_fraction = 0.05` and `cfg.bbox_bg_weight = 0.05` to loss config section. |
+| `experiments/monai_cellmap/configs/cfg_segresnet.py` | Renamed to `segresnet_ds_r3`, new output dir. |
+| `experiments/monai_cellmap/configs/cfg_segresnet_wide.py` | Renamed to `segresnet_wide_r3`, new output dir. |
+| `experiments/monai_cellmap/configs/cfg_flexunet_resnet.py` | Renamed to `flexunet_resnet34_r3`, new output dir. |
+| `experiments/monai_cellmap/configs/cfg_swinunetr.py` | Renamed to `swinunetr_r3`, new output dir. |
+| `experiments/monai_cellmap/slurm/train_r3_*_h100.sbatch` | 4 new SLURM scripts, all targeting H100 partition (queue empty). |
+
+### 10.5 Key Implementation Details
+
+#### 3D Bounding Box Computation (adapted from 2D)
+
+The 2D reference (`BoxClassMaskTverskyLoss` in `experiments/masking_strategies/masking_losses.py`) computed per-class bounding boxes in `(H, W)` using `torch.where()`. The 3D adaptation:
+
+```
+2D: coords = torch.where(pos)  →  (ys, xs)
+    bbox = [y_min:y_max, x_min:x_max]
+    
+3D: coords = torch.where(pos)  →  (zs, ys, xs)  
+    bbox = [z_min:z_max, y_min:y_max, x_min:x_max]
+```
+
+Implemented generically for N spatial dimensions — loops over `range(ndim_spatial)` to compute `min/max` per dimension. Works for both 2D and 3D inputs.
+
+#### Computational Cost
+
+The bbox computation loops over `B × C` samples (B=2, C=35 → 70 iterations per forward pass). Each iteration calls `torch.where()` on a spatial volume (96³–160³ voxels). This is negligible compared to the backbone forward/backward pass.
+
+#### Deep Supervision Interaction
+
+`PartialAnnotationDeepSupervisionLoss` resizes the target via `F.interpolate(nearest)` for each scale level. The spatial bbox mask is recomputed inside `BalancedSoftmaxTverskyLoss.forward()` from the resized target at each scale — no special handling needed.
+
+### 10.6 R3 Training Configuration
+
+All 4 models moved to H100 cluster (queue confirmed empty at time of submission):
+
+| Model | Config Name | Patch Size | Batch | Epochs | GPUs | Port |
+|-------|------------|-----------|-------|--------|------|------|
+| SegResNet-Wide (48f) | `segresnet_wide_r3` | 160³ | 2 | 600 | 2× H100 | 29600 |
+| FlexUNet-ResNet34 | `flexunet_resnet34_r3` | 160³ | 2 | 300 | 2× H100 | 29601 |
+| SwinUNETR v2 | `swinunetr_r3` | 96³ | 3 | 300 | 2× H100 | 29602 |
+| SegResNet (32f) | `segresnet_ds_r3` | 160³ | 2 | 600 | 2× H100 | 29603 |
+
+#### What Changed from R2
+
+| Aspect | R2 | R3 |
+|--------|----|----|
+| **Spatial masking** | None (channel-only) | **box_class_mask_tight** (pad=0.05, bg=0.05) |
+| **bbox_pad_fraction** | — | **0.05** (5% of bbox extent) |
+| **bbox_bg_weight** | — | **0.05** (20× de-weighting outside bbox) |
+| **Run names** | `*_r2` | `*_r3` |
+| **Output dirs** | `runs/monai_cellmap/*_r2/` | `runs/monai_cellmap/*_r3/` |
+| **SwinUNETR cluster** | L40S (Longleaf) | **H100 (Sycamore)** |
+| **SegResNet cluster** | L40S (Longleaf) | **H100 (Sycamore)** |
+
+All other hyperparameters (loss α/β, τ, lr, epochs, architectures, augmentation) remain unchanged from R2.
+
+### 10.7 Expected Impact
+
+Based on the 2D masking_strategies experiment results:
+- `box_class_mask_tight` improved eval Dice from 0.243 → 0.376 (+55%) on 13-dataset evaluation (pre-foreground-fix)
+- The mode collapse in R2 is fundamentally the same problem (no spatial FP penalty)
+- R3 should produce spatially structured predictions instead of uniform mode collapse
+- Conservative estimate: R3 should match or exceed R1 FlexUNet performance (0.233 mean Dice) on 35 classes within the first 50 epochs
+
+### 10.8 Verification Plan
+
+After R3 training starts:
+1. **Early check (epoch 10–20):** Monitor val Dice in TensorBoard — should see per-class values diverging (not all collapsing to same value)
+2. **Mid-training check (epoch 50):** Run `visualize_prediction.py` on test crops — predictions should show organelle-like spatial structure
+3. **Convergence check (epoch 100+):** Compare R3 val Dice trajectories against R2 — should see monotonically improving Dice rather than the flat-then-collapse pattern of R2
+
+---
+
+*This document will be updated as Round 3 results become available.*

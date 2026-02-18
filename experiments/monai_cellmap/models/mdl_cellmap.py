@@ -134,6 +134,8 @@ class Net(nn.Module):
             tversky_beta=getattr(cfg, "tversky_beta", 0.4),
             tau=getattr(cfg, "tau", 1.0),
             update_interval=getattr(cfg, "update_interval", 50),
+            bbox_pad_fraction=getattr(cfg, "bbox_pad_fraction", 0.05),
+            bbox_bg_weight=getattr(cfg, "bbox_bg_weight", 0.05),
             deep_supervision=deep_supervision,
             ds_weights=ds_weights,
         )
