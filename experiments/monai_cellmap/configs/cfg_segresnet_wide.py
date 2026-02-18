@@ -37,11 +37,12 @@ cfg.backbone_args = dict(
 cfg.deep_supervision = True
 cfg.ds_weights = [1.0, 0.5, 0.25, 0.125]
 
-# --- Patches: 160³ b2 on H100 80GB — 192³ OOM'd at ~80 GB (job 1690610).
-#     160³ est. ~50 GB / 80 GB (30 GB headroom). 1.95× more voxels than 128³. ---
+# --- Patches: 160³ b1 on H100 80GB — b2 OOM'd with spatial bbox mask (job 1708869).
+#     Wide model (48 filters) + spatial mask intermediates exceed 80 GB at b2.
+#     b1 with 8 samples/volume gives same voxels/epoch. ---
 cfg.roi_size = [160, 160, 160]
-cfg.num_samples = 4
-cfg.batch_size = 2
+cfg.num_samples = 8
+cfg.batch_size = 1
 
 # --- Training: 600 epochs — same as standard SegResNet, R1 peaked late (ep520).
 #     ~45h on H100, well within 120h limit ---

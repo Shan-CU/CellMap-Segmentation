@@ -16,7 +16,7 @@
 
 # ============================================================
 # SegResNet-Wide 48f — Round 3 — H100 80GB
-# FIX: Added box_class_mask_tight spatial masking (pad=0.05, bg=0.05)
+# FIX: box_class_mask_tight spatial masking + foreground masking (FG_THRESHOLD=0.01)
 # to prevent mode collapse from R2 (all models predicted everything positive)
 # 160³ b2, deep supervision, 35 classes, BalSoftmax+Tversky+BboxMask
 # ============================================================

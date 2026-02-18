@@ -357,11 +357,12 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         fg_mask = self._foreground_mask
         self._foreground_mask = None
 
-        target = target.float()
-
         # Online frequency accumulation (training only)
+        # Use float32 for accumulation precision, but keep target in
+        # its original dtype (bf16 under autocast) for loss computation
+        # to avoid OOM from 4 GiB fp32 intermediates at 160³×35.
         if self.training:
-            self._accumulate(target, mask)
+            self._accumulate(target.float(), mask)
 
         # Compute spatial bbox mask: (B, C, *spatial)
         # Includes foreground masking (zeroes out black-padding voxels)
