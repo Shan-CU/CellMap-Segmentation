@@ -693,8 +693,8 @@ Although `masksup_r0.3` was the #1 strategy **after the foreground masking fix**
 
 | File | Change |
 |------|--------|
-| `experiments/monai_cellmap/losses/partial_annotation.py` | Added `_compute_spatial_mask()` method to `BalancedSoftmaxTverskyLoss`. Modified `forward()` to compute 3D per-class bounding-box spatial weight mask and apply it to TP/FP/FN computation. Added `bbox_pad_fraction` and `bbox_bg_weight` constructor params. Updated `build_partial_annotation_loss()` factory to pass new params. |
-| `experiments/monai_cellmap/models/mdl_cellmap.py` | Updated `build_partial_annotation_loss()` call in `Net.__init__()` to pass `bbox_pad_fraction` and `bbox_bg_weight` from config. |
+| `experiments/monai_cellmap/losses/partial_annotation.py` | Added `_compute_spatial_mask()` method to `BalancedSoftmaxTverskyLoss`. Modified `forward()` to compute 3D per-class bounding-box spatial weight mask and apply it to TP/FP/FN computation. Added `bbox_pad_fraction` and `bbox_bg_weight` constructor params. Updated `build_partial_annotation_loss()` factory to pass new params. **Added foreground masking**: `FG_THRESHOLD=0.01` constant, `set_foreground_mask()` method on both `BalancedSoftmaxTverskyLoss` and `PartialAnnotationDeepSupervisionLoss`, `_compute_spatial_mask()` accepts and applies `foreground_mask` to zero out loss on black-padding voxels. DS wrapper resizes foreground mask via nearest interpolation for each scale level. |
+| `experiments/monai_cellmap/models/mdl_cellmap.py` | Updated `build_partial_annotation_loss()` call in `Net.__init__()` to pass `bbox_pad_fraction` and `bbox_bg_weight` from config. **Added foreground masking**: imports `FG_THRESHOLD`, computes `fg_mask = (x.abs().amax(dim=1, keepdim=True) > FG_THRESHOLD)` from input EM, calls `loss_fn.set_foreground_mask(fg_mask)` before loss computation. |
 | `experiments/monai_cellmap/configs/common_config.py` | Added `cfg.bbox_pad_fraction = 0.05` and `cfg.bbox_bg_weight = 0.05` to loss config section. |
 | `experiments/monai_cellmap/configs/cfg_segresnet.py` | Renamed to `segresnet_ds_r3`, new output dir. |
 | `experiments/monai_cellmap/configs/cfg_segresnet_wide.py` | Renamed to `segresnet_wide_r3`, new output dir. |
@@ -724,7 +724,7 @@ The bbox computation loops over `B × C` samples (B=2, C=35 → 70 iterations pe
 
 #### Deep Supervision Interaction
 
-`PartialAnnotationDeepSupervisionLoss` resizes the target via `F.interpolate(nearest)` for each scale level. The spatial bbox mask is recomputed inside `BalancedSoftmaxTverskyLoss.forward()` from the resized target at each scale — no special handling needed.
+`PartialAnnotationDeepSupervisionLoss` resizes the target via `F.interpolate(nearest)` for each scale level. The spatial bbox mask is recomputed inside `BalancedSoftmaxTverskyLoss.forward()` from the resized target at each scale. The foreground mask is similarly resized via `F.interpolate(nearest)` and re-thresholded (`> 0.5`) for each scale level before being passed to the base loss — no special handling needed.
 
 ### 10.6 R3 Training Configuration
 
@@ -742,6 +742,7 @@ All 4 models moved to H100 cluster (queue confirmed empty at time of submission)
 | Aspect | R2 | R3 |
 |--------|----|----|
 | **Spatial masking** | None (channel-only) | **box_class_mask_tight** (pad=0.05, bg=0.05) |
+| **Foreground masking** | None | **FG_THRESHOLD=0.01** (zero loss on black-padding EM voxels) |
 | **bbox_pad_fraction** | — | **0.05** (5% of bbox extent) |
 | **bbox_bg_weight** | — | **0.05** (20× de-weighting outside bbox) |
 | **Run names** | `*_r2` | `*_r3` |
@@ -749,13 +750,16 @@ All 4 models moved to H100 cluster (queue confirmed empty at time of submission)
 | **SwinUNETR cluster** | L40S (Longleaf) | **H100 (Sycamore)** |
 | **SegResNet cluster** | L40S (Longleaf) | **H100 (Sycamore)** |
 
-All other hyperparameters (loss α/β, τ, lr, epochs, architectures, augmentation) remain unchanged from R2.
+All other hyperparameters (loss α/β, τ, lr, epochs, architectures, augmentation) remain unchanged from R2. The two critical fixes (spatial bbox masking + foreground masking) are the ONLY changes — isolating their combined effect on mode collapse.
 
 ### 10.7 Expected Impact
 
 Based on the 2D masking_strategies experiment results:
 - `box_class_mask_tight` improved eval Dice from 0.243 → 0.376 (+55%) on 13-dataset evaluation (pre-foreground-fix)
-- The mode collapse in R2 is fundamentally the same problem (no spatial FP penalty)
+- **Foreground masking** was the single biggest gain in 2D: +110% on baseline Dice (0.243 → 0.511). Black-padding EM voxels create false-positive penalties on empty regions; zeroing loss there eliminates this dominant noise source.
+- **Combined effect** (bbox masking + foreground masking): In 2D, `box_class_mask_tight` post-foreground-fix achieved 0.538 Dice (#5 overall), demonstrating the two fixes are complementary.
+- Sources of black padding in 3D: (1) `convert_zarr_to_nifti_v2.py` zero-pads when raw EM crop is smaller than label crop; (2) MONAI `SpatialPadd` pads with zeros when volume dimension < roi_size.
+- The mode collapse in R2 is fundamentally the same problem (no spatial FP penalty + no foreground masking)
 - R3 should produce spatially structured predictions instead of uniform mode collapse
 - Conservative estimate: R3 should match or exceed R1 FlexUNet performance (0.233 mean Dice) on 35 classes within the first 50 epochs
 

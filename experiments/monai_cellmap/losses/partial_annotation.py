@@ -33,6 +33,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Foreground masking threshold — pixels below this in the normalized [0,1]
+# EM image are black padding (from zarr boundary or SpatialPad). Loss is
+# zeroed on these voxels to prevent false-positive penalties on empty regions.
+# This was the single biggest gain in 2D experiments: +110% baseline Dice.
+FG_THRESHOLD = 0.01
+
 
 class PartialTverskyLoss(nn.Module):
     """Per-channel Tversky loss with partial annotation masking.
@@ -180,6 +186,7 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         self.bbox_pad_fraction = bbox_pad_fraction
         self.bbox_bg_weight = bbox_bg_weight
         self._annotation_mask: Optional[torch.Tensor] = None
+        self._foreground_mask: Optional[torch.Tensor] = None
 
         # Online frequency estimation buffers
         self.register_buffer(
@@ -193,6 +200,15 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
     def set_annotation_mask(self, mask: torch.Tensor) -> None:
         """Set per-sample annotation mask. Shape: (B, C)."""
         self._annotation_mask = mask
+
+    def set_foreground_mask(self, fg_mask: torch.Tensor) -> None:
+        """Set foreground mask from input EM image. Shape: (B, 1, *spatial).
+
+        Voxels where fg_mask=False are black padding — loss contribution
+        is zeroed. This was the single biggest gain in 2D experiments
+        (+110% baseline Dice improvement).
+        """
+        self._foreground_mask = fg_mask
 
     @staticmethod
     def _compute_adjustments(
@@ -242,6 +258,7 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         self,
         target: torch.Tensor,
         annotation_mask: Optional[torch.Tensor],
+        foreground_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Compute per-class 3D bounding-box spatial weight mask.
 
@@ -250,6 +267,7 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         2. Pad bbox by bbox_pad_fraction of its size in each dimension
         3. Set voxels inside padded bbox to 1.0, outside to bbox_bg_weight
         4. Multiply by annotation mask (unannotated channels → all zeros)
+        5. Zero out voxels where the input EM is black padding (foreground mask)
 
         For annotated classes with NO foreground voxels in this crop:
         - bbox_bg_weight everywhere → model IS penalised for any positive
@@ -258,6 +276,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         Args:
             target: (B, C, *spatial) binary ground truth.
             annotation_mask: (B, C) annotation mask, or None.
+            foreground_mask: (B, 1, *spatial) boolean mask, True = real EM data,
+                False = black padding. If None, all voxels are treated as foreground.
 
         Returns:
             (B, C, *spatial) spatial weight mask.
@@ -307,6 +327,13 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
                 # Set inside padded bbox to 1.0
                 spatial_mask[b, c][tuple(slices)] = 1.0
 
+        # Zero out black-padding voxels (foreground masking fix)
+        # This is the single biggest gain from 2D experiments (+110% Dice).
+        # fg_mask is (B, 1, *spatial) → broadcast across C channels.
+        if foreground_mask is not None:
+            fg = foreground_mask.to(device=device, dtype=spatial_mask.dtype)
+            spatial_mask = spatial_mask * fg  # (B, C, *spatial) × (B, 1, *spatial)
+
         return spatial_mask
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -327,6 +354,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         """
         mask = self._annotation_mask
         self._annotation_mask = None
+        fg_mask = self._foreground_mask
+        self._foreground_mask = None
 
         target = target.float()
 
@@ -335,7 +364,8 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
             self._accumulate(target, mask)
 
         # Compute spatial bbox mask: (B, C, *spatial)
-        spatial_w = self._compute_spatial_mask(target, mask)
+        # Includes foreground masking (zeroes out black-padding voxels)
+        spatial_w = self._compute_spatial_mask(target, mask, fg_mask)
 
         # Apply logit adjustment per channel
         adj = self.logit_adj.to(input.device)
@@ -389,9 +419,13 @@ class PartialAnnotationDeepSupervisionLoss(nn.Module):
         self.base_loss = base_loss
         self.weights = weights
         self._annotation_mask: Optional[torch.Tensor] = None
+        self._foreground_mask: Optional[torch.Tensor] = None
 
     def set_annotation_mask(self, mask: torch.Tensor) -> None:
         self._annotation_mask = mask
+
+    def set_foreground_mask(self, fg_mask: torch.Tensor) -> None:
+        self._foreground_mask = fg_mask
 
     def forward(
         self,
@@ -419,15 +453,28 @@ class PartialAnnotationDeepSupervisionLoss(nn.Module):
                 else:
                     t = target
 
+                # Resize foreground mask to match prediction if needed
+                fg = self._foreground_mask
+                if fg is not None and pred.shape[2:] != fg.shape[2:]:
+                    fg = F.interpolate(
+                        fg.float(), size=pred.shape[2:], mode="nearest"
+                    ) > 0.5
+
                 self.base_loss.set_annotation_mask(self._annotation_mask)
+                if hasattr(self.base_loss, 'set_foreground_mask'):
+                    self.base_loss.set_foreground_mask(fg)
                 total_loss = total_loss + w * self.base_loss(pred, t)
                 total_weight += w
 
             self._annotation_mask = None
+            self._foreground_mask = None
             return total_loss / max(total_weight, 1e-8)
         else:
             self.base_loss.set_annotation_mask(self._annotation_mask)
+            if hasattr(self.base_loss, 'set_foreground_mask'):
+                self.base_loss.set_foreground_mask(self._foreground_mask)
             self._annotation_mask = None
+            self._foreground_mask = None
             return self.base_loss(input, target)
 
 

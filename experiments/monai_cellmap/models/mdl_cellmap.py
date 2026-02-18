@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from losses.partial_annotation import build_partial_annotation_loss
+from losses.partial_annotation import build_partial_annotation_loss, FG_THRESHOLD
 
 
 class Mixup(nn.Module):
@@ -181,9 +181,17 @@ class Net(nn.Module):
             logits = self.backbone(x)
             outputs["logits"] = logits if not isinstance(logits, (list, tuple)) else logits[0]
 
-            # Compute loss with partial annotation masking
+            # Compute loss with partial annotation + foreground masking
             if mask is not None:
                 self.loss_fn.set_annotation_mask(mask)
+
+            # Foreground mask: True where EM image has real data, False on black padding.
+            # This was the single biggest gain in 2D experiments: +110% baseline Dice.
+            # Zero-valued EM voxels come from: (1) zarr crop boundaries padded with zeros
+            # in convert_zarr_to_nifti_v2.py, (2) MONAI SpatialPadd when volume < roi_size.
+            fg_mask = (x.abs().amax(dim=1, keepdim=True) > FG_THRESHOLD)  # (B, 1, D, H, W)
+            if hasattr(self.loss_fn, 'set_foreground_mask'):
+                self.loss_fn.set_foreground_mask(fg_mask)
 
             # logits may be a list (deep supervision) or single tensor
             outputs["loss"] = self.loss_fn(logits, y)
