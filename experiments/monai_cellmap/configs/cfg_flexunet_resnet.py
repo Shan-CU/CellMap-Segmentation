@@ -37,11 +37,13 @@ cfg.lvl_weights = [0, 0, 0, 1]  # only final scale
 cfg.mixup_p = 0.0
 cfg.mixup_beta = 1.0
 
-# --- Patches: 192³ b4 on H100 80GB — est. ~55 GB / 80 GB (25 GB headroom).
-#     128³ b4 was for L40S 48GB (~33 GB). H100 allows much bigger patches. ---
-cfg.roi_size = [192, 192, 192]
-cfg.num_samples = 4
-cfg.batch_size = 4
+# --- Patches: 160³ b2 on H100 80GB — 160³ b4 OOM'd at ~80 GB (job 1690639).
+#     b2 halves memory vs b4. 160³ b2 est. ~40 GB / 80 GB (40 GB headroom).
+#     H100 policy: jobs using <48 GB VRAM may be killed. b2 × num_samples=4
+#     → 47 GB per GPU (below threshold). Bump num_samples 4→5 → ~58 GB. ---
+cfg.roi_size = [160, 160, 160]
+cfg.num_samples = 5
+cfg.batch_size = 2
 
 # --- Training (Round 2: 300 epochs — best was at ep204/600) ---
 cfg.lr = 1e-3

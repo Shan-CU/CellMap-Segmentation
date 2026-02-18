@@ -29,10 +29,10 @@ cfg.backbone_args = dict(
 )
 cfg.deep_supervision = False  # SwinUNETR doesn't have built-in DS
 
-# --- Patches: keep at 96³ (Round 1 was 90% VRAM — DO NOT increase) ---
+# --- Patches: 96³ b3 on H100 80GB (was b2 on L40S 48GB ~42GB VRAM → b3 ~63GB) ---
 cfg.roi_size = [96, 96, 96]
 cfg.num_samples = 4
-cfg.batch_size = 2
+cfg.batch_size = 3
 
 # --- Training (Round 2: 300 epochs — best was at ep139/600, most volatile) ---
 cfg.lr = 1e-4

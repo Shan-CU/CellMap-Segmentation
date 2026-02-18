@@ -37,13 +37,14 @@ cfg.backbone_args = dict(
 cfg.deep_supervision = True
 cfg.ds_weights = [1.0, 0.5, 0.25, 0.125]
 
-# --- Patches: 192³ b2 on H100 80GB — est. ~65 GB / 80 GB (15 GB headroom).
-#     128³ was for L40S 48GB. H100 allows 3.375× more voxels per patch. ---
-cfg.roi_size = [192, 192, 192]
+# --- Patches: 160³ b2 on H100 80GB — 192³ OOM'd at ~80 GB (job 1690610).
+#     160³ est. ~50 GB / 80 GB (30 GB headroom). 1.95× more voxels than 128³. ---
+cfg.roi_size = [160, 160, 160]
 cfg.num_samples = 4
 cfg.batch_size = 2
 
-# --- Training: same schedule as standard SegResNet ---
+# --- Training: 600 epochs — same as standard SegResNet, R1 peaked late (ep520).
+#     ~45h on H100, well within 120h limit ---
 cfg.lr = 2e-4
-cfg.epochs = 300
+cfg.epochs = 600
 cfg.eval_epochs = 5
