@@ -188,13 +188,6 @@ experiments/class_weighting/model_comparison/results/
 *.json
 .nfs*
 
-# Allow experiment results and logs to be tracked
-!experiments/loss_optimization/results/
-!experiments/loss_optimization/results/*.json
-!experiments/loss_optimization/logs_parallel_*/
-!experiments/loss_optimization/logs_parallel_*/*.log
-!experiments/loss_optimization/logs_parallel_*/*.log
-
 # visual studio code configuration
 .vscode
 
@@ -206,3 +199,19 @@ result_submitted_only.json
 
 # Bash tasks
 nohup.out
+
+# Archived data (too large for git)
+archive/auto3dseg/nifti_data*/
+archive/auto3dseg/work_dir/
+archive/auto3dseg/reconvert.log
+archive/logs/
+archive/experiments/monai_cellmap/checkpoints_2d*/
+archive/experiments/monai_cellmap/tensorboard_2d*/
+archive/experiments/monai_cellmap/visualizations/
+archive/experiments/model_comparison/checkpoints/
+archive/experiments/model_comparison/visualizations/
+archive/experiments/model_comparison/slurm/
+archive/experiments/model_comparison/tensorboard/
+archive/experiments/l40s_comparison/visualizations/
+archive/experiments/l40s_comparison/slurm/
+*.nii.gz

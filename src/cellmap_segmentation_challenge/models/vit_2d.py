@@ -106,12 +106,16 @@ class Attention(nn.Module):
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
         
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        attention_probs = self.softmax(attention_scores)
-        attention_probs = self.attn_dropout(attention_probs)
+        # Use PyTorch's fused SDPA — autocast-safe (bf16/fp16) and
+        # memory-efficient (FlashAttention / math fallback).
+        # Replaces manual matmul → scale → softmax → dropout → matmul
+        # that caused CUDA errors under mixed-precision autocast.
+        dropout_p = self.attn_dropout.p if self.training else 0.0
+        context_layer = torch.nn.functional.scaled_dot_product_attention(
+            query_layer, key_layer, value_layer,
+            dropout_p=dropout_p,
+        )
         
-        context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)

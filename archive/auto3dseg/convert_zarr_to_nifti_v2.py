@@ -1,0 +1,663 @@
+#!/usr/bin/env python3
+"""
+Convert CellMap zarr groundtruth + EM to NIfTI for MONAI training (v2).
+
+Major changes from v1:
+- 31 atomic classes (up from 14) — all leaf classes that appear in zarr GT
+- Group classes (nuc, mito, ves, etc.) are NOT stored in NIfTI — they are
+  composed at inference time via union of sub-classes
+- All 289 zarr crops processed (v1 missed 12)
+- Per-crop annotation audit: records which classes have non-zero voxels
+- Parallel conversion via multiprocessing
+- Outputs to nifti_data_v2/ (v1 data in nifti_data/ renamed to nifti_data_old/)
+
+Output format:
+  nifti_data_v2/images/<dataset>_<crop>_0000.nii.gz   — uint8 EM
+  nifti_data_v2/labels/<dataset>_<crop>.nii.gz         — uint8 integer labels (0-31)
+  nifti_data_v2/datalist.json                          — MONAI datalist with annotations
+
+Integer encoding:
+  0 = background / unannotated
+  1..31 = atomic class ID (see ATOMIC_CLASSES below)
+
+Usage:
+  python auto3dseg/convert_zarr_to_nifti_v2.py [--workers 16] [--dry-run]
+
+Requires: zarr, nibabel, numpy
+"""
+
+from __future__ import annotations
+
+import argparse
+import gc
+import csv
+import json
+import os
+import re
+import sys
+import time
+import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+import nibabel as nib
+import numpy as np
+import zarr
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLASS DEFINITIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# All 47 tested classes, split into two sets:
+#
+# A) TRAINABLE classes (35 atomic leaf classes from zarr groundtruth)
+#    - These get integer labels 1..35 in the NIfTI
+#    - The model predicts these directly
+#
+# B) GROUP classes (composites)
+#    - Composed at inference time by union of atomic predictions
+#    - NOT stored in NIfTI labels — zero training cost
+#
+# Why not train on groups directly? Because the zarr stores both the leaf
+# and the pre-composed group. Training on both would double-count voxels
+# (e.g., mito_mem voxels appear in both mito_mem channel AND mito channel).
+# Instead: predict 35 leaves → compose groups → submit all 48.
+#
+# Exception: "nuc" — the challenge defines nuc = union(ne_mem..nucleo).
+# We verified that in all crops, nuc voxels == union of sub-nuclear classes
+# (ne_mem, ne_lum, np_out, np_in, hchrom, echrom, nucpl, nhchrom, nechrom,
+# nucleo).  Since these sub-classes fully overlap nuc in the single-label
+# encoding, we do NOT write nuc to the NIfTI.  Instead, nuc is
+# reconstructed at training time as the union of sub-nuclear channels in
+# _expand_label / IntegerLabelToMultiChanneld.  This avoids the problem
+# where sub-nuclear classes overwrite 100% of nuc voxels.
+
+ATOMIC_CLASSES = [
+    # ── Original 14 from Round 1 ──
+    "ecs",          #  1
+    "pm",           #  2
+    "mito_mem",     #  3
+    "mito_lum",     #  4
+    "mito_ribo",    #  5
+    "golgi_mem",    #  6
+    "golgi_lum",    #  7
+    "ves_mem",      #  8
+    "ves_lum",      #  9
+    "endo_mem",     # 10
+    "endo_lum",     # 11
+    "er_mem",       # 12
+    "er_lum",       # 13
+    "nuc",          # 14  — read directly from zarr (see note above)
+    # ── New for Round 2 ──
+    "lyso_mem",     # 15
+    "lyso_lum",     # 16
+    "ld_mem",       # 17
+    "ld_lum",       # 18
+    "eres_mem",     # 19
+    "eres_lum",     # 20
+    "ne_mem",       # 21
+    "ne_lum",       # 22
+    "np_out",       # 23
+    "np_in",        # 24
+    "hchrom",       # 25
+    "echrom",       # 26
+    "nucpl",        # 27
+    "mt_out",       # 28
+    "cyto",         # 29
+    "mt_in",        # 30
+    "perox_mem",    # 31
+    "perox_lum",    # 32
+    "nhchrom",      # 33  — needed for chrom + nuc groups
+    "nechrom",      # 34  — needed for chrom + nuc groups
+    "nucleo",       # 35  — needed for nuc group
+]
+
+NUM_CLASSES = len(ATOMIC_CLASSES)  # 35
+CLASS_TO_ID = {name: idx + 1 for idx, name in enumerate(ATOMIC_CLASSES)}
+
+# Group classes composed at inference time via union of atomic predictions.
+# Maps group_name -> list of ATOMIC class names whose predictions are OR'd.
+GROUP_CLASSES = {
+    "mito":       ["mito_mem", "mito_lum", "mito_ribo"],
+    "golgi":      ["golgi_mem", "golgi_lum"],
+    "ves":        ["ves_mem", "ves_lum"],
+    "endo":       ["endo_mem", "endo_lum"],
+    "lyso":       ["lyso_mem", "lyso_lum"],
+    "ld":         ["ld_mem", "ld_lum"],
+    "eres":       ["eres_mem", "eres_lum"],
+    "perox":      ["perox_mem", "perox_lum"],
+    "ne":         ["ne_mem", "ne_lum", "np_out", "np_in"],
+    "np":         ["np_out", "np_in"],
+    "chrom":      ["hchrom", "nhchrom", "echrom", "nechrom"],
+    "mt":         ["mt_out", "mt_in"],
+    "er":         ["er_mem", "er_lum", "eres_mem", "eres_lum",
+                   "ne_mem", "ne_lum", "np_out", "np_in"],
+    "er_mem_all": ["er_mem", "eres_mem", "ne_mem"],
+    "ne_mem_all": ["ne_mem", "np_out", "np_in"],
+    "cell":       ["pm", "mito_mem", "mito_lum", "mito_ribo",
+                   "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
+                   "endo_mem", "endo_lum", "lyso_mem", "lyso_lum",
+                   "ld_mem", "ld_lum", "er_mem", "er_lum",
+                   "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+                   "np_out", "np_in", "hchrom", "nhchrom",
+                   "echrom", "nechrom", "nucpl", "nucleo",
+                   "mt_out", "cyto", "mt_in", "perox_mem", "perox_lum"],
+    # "nuc" is both a tested group AND an atomic zarr class — we train it
+    # directly (ATOMIC_CLASSES[13]), so no group composition needed.
+}
+
+# 48 tested classes (from tested_classes.csv)
+TESTED_CLASSES = [
+    "ecs", "pm", "mito_mem", "mito_lum", "mito_ribo",
+    "golgi_mem", "golgi_lum", "ves_mem", "ves_lum",
+    "endo_mem", "endo_lum", "lyso_mem", "lyso_lum",
+    "ld_mem", "ld_lum", "er_mem", "er_lum",
+    "eres_mem", "eres_lum", "ne_mem", "ne_lum",
+    "np_out", "np_in", "hchrom", "echrom", "nucpl",
+    "mt_out", "cyto", "mt_in",
+    "nuc", "golgi", "ves", "endo", "lyso", "ld", "eres",
+    "perox_mem", "perox_lum", "perox",
+    "mito", "er", "ne", "np", "chrom", "mt",
+    "cell", "er_mem_all", "ne_mem_all",
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONVERSION LOGIC
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_zarr_array(zarr_path: str, class_name: str, crop_name: str) -> np.ndarray | None:
+    """Load a zarr groundtruth array at s0 resolution.
+
+    Tries multiple scale keys (s0, s1, etc.) and picks the highest resolution.
+    Returns None if the class directory doesn't exist or has no data.
+    """
+    gt_path = os.path.join(zarr_path, "recon-1", "labels", "groundtruth", crop_name, class_name)
+    if not os.path.isdir(gt_path):
+        return None
+
+    # Try s0 first (highest resolution)
+    for scale in ["s0", "s1", "s2"]:
+        scale_path = os.path.join(gt_path, scale)
+        if os.path.isdir(scale_path):
+            try:
+                arr = zarr.open(scale_path, mode="r")
+                data = np.asarray(arr)
+                if data.size > 0:
+                    return data
+            except Exception:
+                continue
+    return None
+
+
+def _get_crop_offset_and_shape(zarr_path: str, crop_name: str) -> tuple[list[int] | None, tuple[int, ...] | None, str]:
+    """Get the voxel offset and shape of a crop by reading zarr metadata.
+
+    Reads the first available class label array to determine the crop's
+    spatial extent and its coordinate-transform offset relative to the
+    full EM volume.  Returns (voxel_offset, label_shape, scale_key).
+    """
+    gt_base = os.path.join(zarr_path, "recon-1", "labels", "groundtruth", crop_name)
+    em_base = os.path.join(zarr_path, "recon-1", "em", "fibsem-uint8")
+    if not os.path.isdir(gt_base):
+        return None, None, "s0"
+
+    # Find first available class to read metadata from
+    for cls_name in ATOMIC_CLASSES:
+        cls_dir = os.path.join(gt_base, cls_name)
+        if not os.path.isdir(cls_dir):
+            continue
+        for scale in ["s0", "s1", "s2"]:
+            scale_path = os.path.join(cls_dir, scale)
+            if not os.path.isdir(scale_path):
+                continue
+            try:
+                arr = zarr.open(scale_path, mode="r")
+                label_shape = arr.shape
+                if arr.size == 0:
+                    continue
+
+                # Parse coordinate transforms from .zattrs
+                label_translation = None
+                label_scale_vals = None
+                raw_scale_vals = None
+
+                # Label metadata
+                label_group = zarr.open(cls_dir, mode="r")
+                if hasattr(label_group, "attrs") and "multiscales" in label_group.attrs:
+                    ms = label_group.attrs["multiscales"]
+                    if isinstance(ms, list) and len(ms) > 0:
+                        for ds in ms[0].get("datasets", []):
+                            if ds.get("path") == scale:
+                                for t in ds.get("coordinateTransformations", []):
+                                    if t.get("type") == "translation":
+                                        label_translation = t["translation"]
+                                    elif t.get("type") == "scale":
+                                        label_scale_vals = t["scale"]
+
+                # Raw EM metadata
+                em_group_path = os.path.join(em_base)
+                if os.path.isdir(em_group_path):
+                    em_group = zarr.open(em_group_path, mode="r")
+                    if hasattr(em_group, "attrs") and "multiscales" in em_group.attrs:
+                        ms = em_group.attrs["multiscales"]
+                        if isinstance(ms, list) and len(ms) > 0:
+                            for ds in ms[0].get("datasets", []):
+                                if ds.get("path") == scale:
+                                    for t in ds.get("coordinateTransformations", []):
+                                        if t.get("type") == "scale":
+                                            raw_scale_vals = t["scale"]
+
+                if label_translation and raw_scale_vals:
+                    voxel_offset = [
+                        int(round(label_translation[i] / raw_scale_vals[i]))
+                        for i in range(len(raw_scale_vals))
+                    ]
+                    return voxel_offset, label_shape, scale
+
+                # Fallback: no offset metadata, return None offset
+                return None, label_shape, scale
+            except Exception:
+                continue
+
+    return None, None, "s0"
+
+
+def get_em_region(zarr_path: str, voxel_offset: list[int] | None,
+                  crop_shape: tuple[int, ...], scale: str = "s0") -> np.ndarray | None:
+    """Load only the EM region corresponding to a label crop.
+
+    If voxel_offset is available, slices the full EM array (zero-copy from zarr).
+    Falls back to reading from origin if offset is unknown.
+    """
+    em_base = os.path.join(zarr_path, "recon-1", "em", "fibsem-uint8")
+    # Try requested scale first, then fallback
+    scales_to_try = [scale] + [s for s in ["s0", "s1"] if s != scale]
+    for sc in scales_to_try:
+        scale_path = os.path.join(em_base, sc)
+        if not os.path.isdir(scale_path):
+            continue
+        try:
+            arr = zarr.open(scale_path, mode="r")
+            if voxel_offset is not None:
+                # Clip the region to the EM volume extent, then zero-pad
+                # to crop_shape.  This correctly handles crops that extend
+                # slightly past the EM boundary (common for edge crops).
+                clipped_start = [max(0, voxel_offset[i]) for i in range(len(crop_shape))]
+                clipped_end = [min(arr.shape[i], voxel_offset[i] + crop_shape[i])
+                               for i in range(len(crop_shape))]
+                clipped_shape = tuple(clipped_end[i] - clipped_start[i] for i in range(len(crop_shape)))
+
+                if all(s > 0 for s in clipped_shape):
+                    slices = tuple(slice(clipped_start[i], clipped_end[i])
+                                   for i in range(len(crop_shape)))
+                    data = np.array(arr[slices])
+                    # Pad back to full crop_shape if we clipped
+                    if data.shape != crop_shape:
+                        padded = np.zeros(crop_shape, dtype=data.dtype)
+                        # Where in the output the clipped data goes
+                        pad_start = [clipped_start[i] - voxel_offset[i]
+                                     for i in range(len(crop_shape))]
+                        pad_slices = tuple(
+                            slice(pad_start[i], pad_start[i] + data.shape[i])
+                            for i in range(len(crop_shape))
+                        )
+                        padded[pad_slices] = data
+                        return padded
+                    return data
+                # else: no overlap at all — fall through
+
+            # Fallback (no offset): read from origin
+            slices = tuple(slice(0, min(s, arr.shape[i]))
+                           for i, s in enumerate(crop_shape))
+            data = np.array(arr[slices])
+            if data.shape != crop_shape:
+                padded = np.zeros(crop_shape, dtype=data.dtype)
+                pad_slices = tuple(slice(0, s) for s in data.shape)
+                padded[pad_slices] = data
+                return padded
+            return data
+        except Exception:
+            continue
+    return None
+
+
+def convert_one_crop(
+    dataset_name: str,
+    crop_name: str,
+    zarr_path: str,
+    output_images_dir: str,
+    output_labels_dir: str,
+    dry_run: bool = False,
+) -> dict | None:
+    """Convert a single zarr crop to NIfTI.
+
+    Returns a dict with metadata, or None if the crop has no usable data.
+    """
+    crop_id = f"{dataset_name}_{crop_name}"
+    img_out = os.path.join(output_images_dir, f"{crop_id}_0000.nii.gz")
+    lbl_out = os.path.join(output_labels_dir, f"{crop_id}.nii.gz")
+
+    # NOTE: We do NOT skip already-converted files.  The annotation audit
+    # requires reading zarr directories (not just NIfTI foreground) to
+    # correctly identify true negatives, and the EM clipping fix may change
+    # the image data.  Always reconvert.
+    # To skip, delete the force flag or add a --skip-existing option.
+
+    if dry_run:
+        return {
+            "crop_id": crop_id,
+            "status": "dry_run",
+            "annotated_indices": [],
+            "shape": [],
+        }
+
+    # Determine crop spatial extent from label metadata
+    voxel_offset, label_shape, scale = _get_crop_offset_and_shape(zarr_path, crop_name)
+    if label_shape is None:
+        print(f"  SKIP {crop_id}: no label data found")
+        return None
+
+    shape = label_shape  # (Z, Y, X) — authoritative from label array
+
+    # Load only the EM region corresponding to this crop (NOT the full volume)
+    em_data = get_em_region(zarr_path, voxel_offset, shape, scale)
+    if em_data is None:
+        print(f"  SKIP {crop_id}: no EM data")
+        return None
+
+    # Build integer label volume
+    label_vol = np.zeros(shape, dtype=np.uint8)
+    annotated_indices = []
+    annotated_names = []
+
+    # Sub-nuclear classes whose union == nuc.  nuc (id=14) is NOT written
+    # into the single-label volume because these later classes would overwrite
+    # it.  Instead, nuc is reconstructed at training time from the union of
+    # these sub-classes.  This avoids the 100% overwrite problem.
+    NUC_SUB_CLASSES = {
+        "ne_mem", "ne_lum", "np_out", "np_in",
+        "hchrom", "echrom", "nucpl",
+        "nhchrom", "nechrom", "nucleo",
+    }
+
+    for cls_name in ATOMIC_CLASSES:
+        cls_id = CLASS_TO_ID[cls_name]
+
+        # Check if this class has a zarr directory (= is annotated in this crop)
+        gt_base = os.path.join(zarr_path, "recon-1", "labels", "groundtruth", crop_name)
+        cls_dir = os.path.join(gt_base, cls_name)
+        cls_has_zarr = os.path.isdir(cls_dir)
+
+        gt_data = get_zarr_array(zarr_path, cls_name, crop_name)
+
+        if gt_data is None:
+            # If the zarr directory exists but has no data/array, still mark
+            # as annotated (it's a true negative — the class was checked and
+            # found absent in this crop).
+            if cls_has_zarr:
+                annotated_indices.append(cls_id - 1)  # 0-indexed
+                annotated_names.append(cls_name)
+            continue
+
+        # Resize if shape mismatch (different scales)
+        if gt_data.shape != shape:
+            from scipy.ndimage import zoom
+            zoom_factors = tuple(s / g for s, g in zip(shape, gt_data.shape))
+            gt_data = zoom(gt_data.astype(np.float32), zoom_factors, order=0).astype(np.uint8)
+
+        # Mark as annotated whether or not it has foreground voxels
+        annotated_indices.append(cls_id - 1)  # 0-indexed
+        annotated_names.append(cls_name)
+
+        # Check for non-zero content
+        mask = gt_data > 0
+        if not np.any(mask):
+            continue
+
+        # Skip writing nuc into single-label volume — it would be 100%
+        # overwritten by sub-nuclear classes that come later in ATOMIC_CLASSES.
+        # nuc is perfectly reconstructed at training time as:
+        #   nuc = OR(ne_mem, ne_lum, np_out, np_in, hchrom, echrom, nucpl,
+        #           nhchrom, nechrom, nucleo)
+        if cls_name == "nuc":
+            continue
+
+        # Write into label volume (later classes overwrite earlier — shouldn't
+        # overlap for non-nuc atomic classes, but if they do, last wins)
+        label_vol[mask] = cls_id
+
+    if not annotated_indices:
+        print(f"  SKIP {crop_id}: all classes empty")
+        return None
+
+    # Save NIfTI — use identity affine (isotropic 1mm, doesn't matter for MONAI)
+    affine = np.eye(4)
+
+    em_nii = nib.Nifti1Image(em_data.astype(np.uint8), affine)
+    nib.save(em_nii, img_out)
+
+    lbl_nii = nib.Nifti1Image(label_vol, affine)
+    nib.save(lbl_nii, lbl_out)
+
+    # Free large arrays before returning
+    del em_data, label_vol, em_nii, lbl_nii
+    gc.collect()
+
+    size_mb = (os.path.getsize(img_out) + os.path.getsize(lbl_out)) / (1024 * 1024)
+    print(f"  OK {crop_id}: shape={shape}, classes={len(annotated_indices)}/{NUM_CLASSES} "
+          f"({','.join(annotated_names[:5])}{'...' if len(annotated_names) > 5 else ''}), "
+          f"size={size_mb:.1f}MB")
+
+    return {
+        "crop_id": crop_id,
+        "image": img_out,
+        "label": lbl_out,
+        "annotated_indices": annotated_indices,
+        "annotated_names": annotated_names,
+        "shape": list(shape),
+        "status": "converted",
+    }
+
+
+def _convert_wrapper(args):
+    """Wrapper for multiprocessing — unpacks args and catches exceptions."""
+    try:
+        return convert_one_crop(*args)
+    except Exception as e:
+        crop_id = f"{args[0]}_{args[1]}"
+        print(f"  ERROR {crop_id}: {e}")
+        traceback.print_exc()
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DATALIST GENERATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+def build_datalist(results: list[dict], datasplit_path: str, output_path: str):
+    """Build datalist.json from conversion results + datasplit.csv for train/val split."""
+
+    # Parse datasplit.csv for train/val assignment
+    split_map = {}  # crop_id -> "train" or "validate"
+    with open(datasplit_path, "r") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 5:
+                continue
+            split = row[0].strip().strip('"')
+            if split not in ("train", "validate"):
+                continue
+            raw_path = row[1].strip().strip('"')
+            label_key = row[4].strip().strip('"')
+
+            ds_match = re.search(r"(jrc_[^/]+)", raw_path)
+            crop_match = re.search(r"(crop\d+)", label_key)
+            if ds_match and crop_match:
+                crop_id = f"{ds_match.group(1)}_{crop_match.group(1)}"
+                if crop_id not in split_map:
+                    split_map[crop_id] = split
+
+    training = []
+    validation = []
+
+    for r in results:
+        crop_id = r["crop_id"]
+        ann_indices = sorted(r["annotated_indices"])
+        ann_str = ",".join(str(i) for i in ann_indices) if ann_indices else ""
+
+        item = {
+            "image": r["image"],
+            "label": r["label"],
+            "annotated_classes": ann_str,
+        }
+
+        split = split_map.get(crop_id, "train")
+        if split == "validate":
+            validation.append(item)
+        else:
+            training.append(item)
+
+    class_names_cfg = [
+        {"name": name, "index": [idx + 1]}
+        for idx, name in enumerate(ATOMIC_CLASSES)
+    ]
+
+    datalist = {
+        "name": "CellMap FIB-SEM Segmentation Challenge (v2 — 32 atomic classes)",
+        "description": "3D FIB-SEM volumes with integer labels 0-32 and partial annotation masking. "
+                       "Group classes (mito, nuc, ves, etc.) composed at inference.",
+        "modality": "CT",
+        "sigmoid": True,
+        "num_classes": NUM_CLASSES,
+        "class_names": class_names_cfg,
+        "group_classes": {k: v for k, v in GROUP_CLASSES.items()},
+        "tested_classes": TESTED_CLASSES,
+        "training": training,
+    }
+    if validation:
+        datalist["validation"] = validation
+
+    with open(output_path, "w") as f:
+        json.dump(datalist, f, indent=2)
+
+    print(f"\nDatalist saved: {output_path}")
+    print(f"  Training:   {len(training)}")
+    print(f"  Validation: {len(validation)}")
+
+    # Per-class coverage summary
+    print(f"\n  Per-class annotation coverage ({NUM_CLASSES} classes):")
+    all_results = training + validation
+    for idx, cls_name in enumerate(ATOMIC_CLASSES):
+        n = sum(1 for item in all_results
+                if str(idx) in item["annotated_classes"].split(","))
+        pct = 100 * n / len(all_results) if all_results else 0
+        print(f"    {idx+1:2d} {cls_name:<12}: {n:>3}/{len(all_results)} ({pct:5.1f}%)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert CellMap zarr to NIfTI (v2, 32 atomic classes)")
+    parser.add_argument("--workers", type=int, default=16, help="Parallel workers")
+    parser.add_argument("--dry-run", action="store_true", help="Don't actually write files")
+    parser.add_argument("--data-dir", type=str, default=None, help="Override data directory")
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).parent
+    repo_dir = script_dir.parent
+    data_dir = Path(args.data_dir) if args.data_dir else repo_dir / "data"
+    output_dir = script_dir / "nifti_data_v2"
+    images_dir = output_dir / "images"
+    labels_dir = output_dir / "labels"
+    datasplit_path = repo_dir / "datasplit.csv"
+
+    os.makedirs(images_dir, exist_ok=True)
+    os.makedirs(labels_dir, exist_ok=True)
+
+    # Auto-detect workers from CPU count (like v1 converter)
+    if args.workers == 0:
+        import multiprocessing
+        args.workers = min(64, multiprocessing.cpu_count())
+
+    print(f"CellMap Zarr → NIfTI v2 Converter")
+    print(f"  Data dir:    {data_dir}")
+    print(f"  Output dir:  {output_dir}")
+    print(f"  Workers:     {args.workers}")
+    print(f"  Atomic classes: {NUM_CLASSES}")
+    print(f"  Dry run:     {args.dry_run}")
+    print()
+
+    # Discover all zarr crops
+    jobs = []
+    for ds_entry in sorted(os.listdir(data_dir)):
+        ds_path = data_dir / ds_entry
+        zarr_dir = ds_path / f"{ds_entry}.zarr"
+        gt_dir = zarr_dir / "recon-1" / "labels" / "groundtruth"
+        if not gt_dir.is_dir():
+            continue
+        for crop_entry in sorted(os.listdir(gt_dir)):
+            if not crop_entry.startswith("crop"):
+                continue
+            jobs.append((
+                ds_entry,          # dataset_name
+                crop_entry,        # crop_name (e.g., "crop234")
+                str(zarr_dir),     # zarr_path
+                str(images_dir),   # output_images_dir
+                str(labels_dir),   # output_labels_dir
+                args.dry_run,      # dry_run
+            ))
+
+    print(f"Found {len(jobs)} zarr crops to convert\n")
+
+    # Run conversions in parallel
+    t0 = time.time()
+    results = []
+    total = len(jobs)
+
+    if args.workers <= 1:
+        for i, job in enumerate(jobs, 1):
+            r = _convert_wrapper(job)
+            if r is not None:
+                results.append(r)
+            status = r.get("status", "error") if r else "error"
+            print(f"  [{i}/{total}] {job[0]}_{job[1]} — {status}", flush=True)
+    else:
+        with ProcessPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(_convert_wrapper, job): job for job in jobs}
+            done_count = 0
+            for future in as_completed(futures):
+                done_count += 1
+                r = future.result()
+                job = futures[future]
+                crop_id = f"{job[0]}_{job[1]}"
+                status = r.get("status", "error") if r else "error"
+                if r is not None:
+                    results.append(r)
+                print(f"  [{done_count}/{total}] {crop_id} — {status}", flush=True)
+
+    elapsed = time.time() - t0
+    n_converted = sum(1 for r in results if r.get("status") == "converted")
+    n_existed = sum(1 for r in results if r.get("status") == "exists")
+    n_total = len(results)
+
+    print(f"\n{'='*60}")
+    print(f"Conversion complete in {elapsed:.1f}s")
+    print(f"  Total crops:   {n_total}")
+    print(f"  New converts:  {n_converted}")
+    print(f"  Already exist: {n_existed}")
+    print(f"  Skipped/error: {len(jobs) - n_total}")
+
+    if not args.dry_run and results:
+        # Build datalist
+        datalist_path = str(output_dir / "datalist.json")
+        build_datalist(results, str(datasplit_path), datalist_path)
+
+    print(f"\nDone!")
+
+
+if __name__ == "__main__":
+    main()
