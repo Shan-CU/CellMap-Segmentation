@@ -6,11 +6,11 @@ via the training script. Each experiment tests one variable while holding
 everything else constant.
 
 Phase 1: Quick ablations (50 epochs, 500 iters/epoch) on ResNet 2D
-  - A: Loss function sweep
-  - B: Tversky α/β sweep
-  - C: Class weighting (τ) sweep
+  - A: Loss function sweep (including Focal Tversky, Unified Focal, Boundary)
+  - B: Tversky α/β sweep (including high-α precision configs from R2)
+  - C: Class weighting (τ) sweep (0, 0.5, 1.0, 1.5, 2.0)
   - D: Masking strategy sweep
-  - E: Foreground masking ablation
+  - E: Training technique sweep (EMA, deep supervision, sampler ablation)
 
 Phase 1b: Quick ablations on SegResNet 3D (same sweeps, 3D data)
 
@@ -54,6 +54,17 @@ class ExperimentConfig:
     # AMP
     amp: bool = True
 
+    # EMA
+    ema: bool = False
+    ema_decay: float = 0.999
+
+    # Deep supervision
+    deep_supervision: bool = False
+    ds_weights: Optional[List[float]] = None
+
+    # Sampler
+    weighted_sampler: bool = True
+
     def to_cli_args(self, run_dir: str = "runs/ablation") -> str:
         """Convert to CLI argument string for training/train.py."""
         args = [
@@ -83,6 +94,14 @@ class ExperimentConfig:
             args.append("--amp")
         else:
             args.append("--no_amp")
+        if self.ema:
+            args.append(f"--ema --ema_decay {self.ema_decay}")
+        if self.deep_supervision:
+            args.append("--deep_supervision")
+            if self.ds_weights:
+                args.append(f"--ds_weights {' '.join(map(str, self.ds_weights))}")
+        if not self.weighted_sampler:
+            args.append("--no_weighted_sampler")
         return " \\\n    ".join(args)
 
 
@@ -111,6 +130,21 @@ LOSS_SWEEP_2D = [
         experiment_name="loss_2d_balanced_softmax_tversky",
         model="resnet_2d", loss="balanced_softmax_tversky",
     ),
+    # --- NEW: Focal Tversky (Abraham & Khan 2019) ---
+    ExperimentConfig(
+        experiment_name="loss_2d_focal_tversky",
+        model="resnet_2d", loss="focal_tversky",
+    ),
+    # --- NEW: Asymmetric Unified Focal (Yeung et al. MedIA 2022) ---
+    ExperimentConfig(
+        experiment_name="loss_2d_unified_focal",
+        model="resnet_2d", loss="unified_focal",
+    ),
+    # --- NEW: Boundary-weighted Tversky ---
+    ExperimentConfig(
+        experiment_name="loss_2d_boundary_tversky",
+        model="resnet_2d", loss="boundary_tversky",
+    ),
 ]
 
 # ============================================================================
@@ -135,6 +169,15 @@ TVERSKY_SWEEP_2D = [
         experiment_name="tversky_2d_recall",
         model="resnet_2d", loss="tversky_recall",
     ),
+    # --- NEW: High-α configs (from R2 precision-boosting findings) ---
+    ExperimentConfig(
+        experiment_name="tversky_2d_a08_b04",
+        model="resnet_2d", loss="tversky_a08_b04",
+    ),
+    ExperimentConfig(
+        experiment_name="tversky_2d_a08_b06",
+        model="resnet_2d", loss="tversky_a08_b06",
+    ),
 ]
 
 # ============================================================================
@@ -157,6 +200,11 @@ WEIGHTING_SWEEP_2D = [
     ExperimentConfig(
         experiment_name="tau_2d_15",
         model="resnet_2d", loss="bst_tau15",
+    ),
+    # --- NEW: τ=2.0 (tested in R2, strong logit adjustment) ---
+    ExperimentConfig(
+        experiment_name="tau_2d_20",
+        model="resnet_2d", loss="bst_tau20",
     ),
 ]
 
@@ -203,6 +251,30 @@ MASKING_SWEEP_2D = [
 ]
 
 # ============================================================================
+# PHASE 1E: Training technique sweep (2D, ResNet)
+# ============================================================================
+
+TECHNIQUE_SWEEP_2D = [
+    # EMA — exponential moving average (standard in nnU-Net v2, Auto3DSeg)
+    ExperimentConfig(
+        experiment_name="tech_2d_ema",
+        model="resnet_2d", loss="balanced_softmax_tversky",
+        ema=True, ema_decay=0.999,
+    ),
+    # Weighted sampler ablation — does data-level reweighting help on top of τ?
+    ExperimentConfig(
+        experiment_name="tech_2d_no_weighted_sampler",
+        model="resnet_2d", loss="balanced_softmax_tversky",
+        weighted_sampler=False,
+    ),
+    # Focal Tversky with mild focal (γ=0.5) — ablation of focal strength
+    ExperimentConfig(
+        experiment_name="tech_2d_focal_tversky_mild",
+        model="resnet_2d", loss="focal_tversky_g05",
+    ),
+]
+
+# ============================================================================
 # PHASE 1 (3D versions): Same sweeps on SegResNet 3D
 # ============================================================================
 
@@ -230,6 +302,27 @@ LOSS_SWEEP_3D = [_make_3d_variant(c) for c in LOSS_SWEEP_2D]
 TVERSKY_SWEEP_3D = [_make_3d_variant(c) for c in TVERSKY_SWEEP_2D]
 WEIGHTING_SWEEP_3D = [_make_3d_variant(c) for c in WEIGHTING_SWEEP_2D]
 MASKING_SWEEP_3D = [_make_3d_variant(c) for c in MASKING_SWEEP_2D]
+
+# Technique sweep for 3D — includes deep supervision (only works with SegResNet)
+_TECHNIQUE_3D_BASE = [_make_3d_variant(c) for c in TECHNIQUE_SWEEP_2D]
+TECHNIQUE_SWEEP_3D = _TECHNIQUE_3D_BASE + [
+    # Deep supervision — SegResNetDS with dsdepth=4 (multi-scale gradients)
+    ExperimentConfig(
+        experiment_name="tech_3d_deep_supervision",
+        model="segresnet_3d",
+        loss="balanced_softmax_tversky",
+        deep_supervision=True,
+        model_kwargs={"dsdepth": 4},
+        batch_size=2,
+        input_shape=[128, 128, 128],
+        input_scale=[8, 8, 8],
+        epochs=50,
+        iterations_per_epoch=250,
+        learning_rate=1e-4,
+        validation_time_limit=180,
+        val_every_n_epochs=5,
+    ),
+]
 
 
 # ============================================================================
@@ -288,8 +381,8 @@ def make_arch_comparison_3d(
 # ALL EXPERIMENTS
 # ============================================================================
 
-ALL_PHASE1_2D = LOSS_SWEEP_2D + TVERSKY_SWEEP_2D + WEIGHTING_SWEEP_2D + MASKING_SWEEP_2D
-ALL_PHASE1_3D = LOSS_SWEEP_3D + TVERSKY_SWEEP_3D + WEIGHTING_SWEEP_3D + MASKING_SWEEP_3D
+ALL_PHASE1_2D = LOSS_SWEEP_2D + TVERSKY_SWEEP_2D + WEIGHTING_SWEEP_2D + MASKING_SWEEP_2D + TECHNIQUE_SWEEP_2D
+ALL_PHASE1_3D = LOSS_SWEEP_3D + TVERSKY_SWEEP_3D + WEIGHTING_SWEEP_3D + MASKING_SWEEP_3D + TECHNIQUE_SWEEP_3D
 ALL_PHASE1 = ALL_PHASE1_2D + ALL_PHASE1_3D
 
 
@@ -304,10 +397,12 @@ def print_experiment_summary():
         ("Tversky α/β Sweep 2D", TVERSKY_SWEEP_2D),
         ("Weighting (τ) Sweep 2D", WEIGHTING_SWEEP_2D),
         ("Masking Strategy Sweep 2D", MASKING_SWEEP_2D),
+        ("Training Technique Sweep 2D", TECHNIQUE_SWEEP_2D),
         ("Loss Sweep 3D", LOSS_SWEEP_3D),
         ("Tversky α/β Sweep 3D", TVERSKY_SWEEP_3D),
         ("Weighting (τ) Sweep 3D", WEIGHTING_SWEEP_3D),
         ("Masking Strategy Sweep 3D", MASKING_SWEEP_3D),
+        ("Training Technique Sweep 3D", TECHNIQUE_SWEEP_3D),
     ]
 
     total = 0

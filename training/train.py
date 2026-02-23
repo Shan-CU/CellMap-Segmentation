@@ -98,6 +98,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--random_seed", type=int, default=42)
 
+    # EMA
+    parser.add_argument("--ema", action="store_true", default=False,
+                        help="Use exponential moving average of model weights")
+    parser.add_argument("--ema_decay", type=float, default=0.999,
+                        help="EMA decay rate")
+
+    # Deep supervision
+    parser.add_argument("--deep_supervision", action="store_true", default=False,
+                        help="Enable deep supervision (model must support it)")
+    parser.add_argument("--ds_weights", type=float, nargs="+", default=None,
+                        help="Deep supervision weights per scale")
+
+    # Data sampling
+    parser.add_argument("--no_weighted_sampler", action="store_true", default=False,
+                        help="Disable weighted crop sampler (use uniform)")
+
+    # OHEM
+    parser.add_argument("--ohem_ratio", type=float, default=0.0,
+                        help="Online hard example mining: keep top-K%% hardest voxels (0=disabled)")
+
     # Scheduler
     parser.add_argument("--scheduler", type=str, default="cosine",
                         choices=["none", "cosine", "step"],
@@ -130,8 +150,41 @@ def parse_args() -> argparse.Namespace:
         args.use_foreground_mask = False
     if args.no_amp:
         args.amp = False
+    args.weighted_sampler = not args.no_weighted_sampler
 
     return args
+
+
+class ModelEMA:
+    """Exponential Moving Average of model weights.
+
+    Maintains a shadow copy of model parameters updated as:
+        shadow = decay * shadow + (1 - decay) * param
+
+    Used at validation/inference for smoother, more generalizable predictions.
+    Standard in nnU-Net v2, MONAI Auto3DSeg, and most competitive medical seg pipelines.
+    """
+
+    def __init__(self, model: nn.Module, decay: float = 0.999):
+        import copy
+        self.decay = decay
+        self.shadow = copy.deepcopy(model)
+        self.shadow.eval()
+        for p in self.shadow.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        for s_param, m_param in zip(self.shadow.parameters(), model.parameters()):
+            s_param.data.mul_(self.decay).add_(m_param.data, alpha=1.0 - self.decay)
+        for s_buf, m_buf in zip(self.shadow.buffers(), model.buffers()):
+            s_buf.copy_(m_buf)
+
+    def state_dict(self):
+        return self.shadow.state_dict()
+
+    def load_state_dict(self, state_dict):
+        self.shadow.load_state_dict(state_dict)
 
 
 def get_annotation_mask_from_targets(targets: torch.Tensor) -> torch.Tensor:
@@ -218,6 +271,9 @@ def train(args: argparse.Namespace) -> None:
         }
 
     print("Loading data...")
+    # Keep data on CPU during loading to avoid CUDA OOM from pre-moving
+    # all ~784 dataset EmptyImage tensors to GPU. The training loop already
+    # handles per-batch .to(device) for inputs and targets.
     train_loader, val_loader = get_dataloader(
         datasplit_path=args.datasplit_path,
         classes=classes,
@@ -227,9 +283,9 @@ def train(args: argparse.Namespace) -> None:
         spatial_transforms=spatial_transforms,
         iterations_per_epoch=args.iterations_per_epoch,
         random_validation=True,
-        device=device,
-        weighted_sampler=True,
-        filter_by_scale=args.filter_by_scale,
+        device="cpu",
+        weighted_sampler=args.weighted_sampler,
+        num_workers=args.num_workers,
     )
     print(f"Train loader: {len(train_loader.loader)} batches/epoch")
     if val_loader is not None:
@@ -241,15 +297,34 @@ def train(args: argparse.Namespace) -> None:
     if "img_size" not in model_kwargs and "3d" in args.model:
         model_kwargs["img_size"] = tuple(args.input_shape)
 
+    # Deep supervision: set dsdepth for SegResNet-style models
+    if args.deep_supervision and "segresnet" in args.model:
+        model_kwargs.setdefault("dsdepth", 4)
+
     model = build_model(args.model, **model_kwargs)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model: {args.model} ({n_params:,} trainable params)")
     model = model.to(device)
 
+    # === EMA ===
+    ema_model = None
+    if args.ema:
+        ema_model = ModelEMA(model, decay=args.ema_decay)
+        print(f"EMA enabled (decay={args.ema_decay})")
+
     # === Loss ===
     loss_kwargs = {"num_classes": num_classes}
     loss_kwargs.update(args.loss_kwargs)
     loss_fn = build_loss(args.loss, **loss_kwargs)
+
+    # Wrap with deep supervision if enabled
+    if args.deep_supervision:
+        from training.losses.partial_annotation import PartialAnnotationDeepSupervisionLoss
+        loss_fn = PartialAnnotationDeepSupervisionLoss(
+            base_loss=loss_fn,
+            weights=args.ds_weights,
+        )
+        print(f"Deep supervision enabled (weights={args.ds_weights})")
     if hasattr(loss_fn, 'to'):
         loss_fn = loss_fn.to(device)
     print(f"Loss: {args.loss}")
@@ -303,6 +378,8 @@ def train(args: argparse.Namespace) -> None:
         n_iter = ckpt["n_iter"]
         if scheduler is not None and "scheduler_state_dict" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if ema_model is not None and "ema_state_dict" in ckpt:
+            ema_model.load_state_dict(ckpt["ema_state_dict"])
         print(f"  Resumed at epoch {start_epoch}, iter {n_iter}")
 
     # === TensorBoard ===
@@ -366,8 +443,11 @@ def train(args: argparse.Namespace) -> None:
             with torch.amp.autocast('cuda', enabled=args.amp and device == "cuda"):
                 outputs = model(inputs)
 
-                # Handle deep supervision (list of outputs)
-                if isinstance(outputs, (list, tuple)):
+                # Deep supervision: pass full output list to DS loss,
+                # otherwise take first element
+                if args.deep_supervision and isinstance(outputs, (list, tuple)):
+                    logits = outputs  # DS loss handles the list
+                elif isinstance(outputs, (list, tuple)):
                     logits = outputs[0]
                 else:
                     logits = outputs
@@ -386,6 +466,11 @@ def train(args: argparse.Namespace) -> None:
 
                 loss = loss / args.gradient_accumulation_steps
 
+            # Skip NaN/Inf losses to prevent poisoning model weights
+            if not torch.isfinite(loss):
+                optimizer.zero_grad()
+                continue
+
             scaler.scale(loss).backward()
 
             if args.max_grad_norm is not None:
@@ -398,6 +483,9 @@ def train(args: argparse.Namespace) -> None:
                 optimizer.zero_grad()
                 if scheduler is not None:
                     scheduler.step()
+                # EMA update
+                if ema_model is not None:
+                    ema_model.update(model)
 
             loss_val = loss.item() * args.gradient_accumulation_steps
             epoch_loss += loss_val
@@ -415,7 +503,8 @@ def train(args: argparse.Namespace) -> None:
 
         # === Validation ===
         if val_loader is not None and (epoch + 1) % args.val_every_n_epochs == 0:
-            model.eval()
+            eval_model = ema_model.shadow if ema_model is not None else model
+            eval_model.eval()
             if hasattr(loss_fn, 'eval'):
                 loss_fn.eval()
 
@@ -441,8 +530,13 @@ def train(args: argparse.Namespace) -> None:
                         loss_fn.set_foreground_mask(fg_mask)
 
                     with torch.amp.autocast('cuda', enabled=args.amp and device == "cuda"):
-                        outputs = model(inputs)
-                        if isinstance(outputs, (list, tuple)):
+                        outputs = eval_model(inputs)
+
+                        # Deep supervision: pass full output list to DS loss,
+                        # otherwise take first element
+                        if args.deep_supervision and isinstance(outputs, (list, tuple)):
+                            logits = outputs  # DS loss handles the list
+                        elif isinstance(outputs, (list, tuple)):
                             logits = outputs[0]
                         else:
                             logits = outputs
@@ -456,8 +550,10 @@ def train(args: argparse.Namespace) -> None:
                                 raw_loss = (raw_loss * nan_mask).sum() / nan_mask.sum().clamp(min=1)
                             vloss = raw_loss
 
-                    val_loss += vloss.item()
-                    val_steps += 1
+                    # Skip NaN/Inf in validation too
+                    if torch.isfinite(vloss):
+                        val_loss += vloss.item()
+                        val_steps += 1
 
                     if time.time() - val_start > args.validation_time_limit:
                         break
@@ -466,10 +562,12 @@ def train(args: argparse.Namespace) -> None:
             writer.add_scalar("val/loss", avg_val_loss, epoch + 1)
             print(f"  Val loss: {avg_val_loss:.4f} ({val_steps} batches)")
 
-            # Save best model
-            if avg_val_loss < best_val_loss:
+            # Save best model (EMA if available, else regular)
+            # Skip when val_steps=0 — avg_val_loss=0.0 is fake, not a real improvement
+            if val_steps > 0 and avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                torch.save(model.state_dict(), ckpt_dir / "best.pth")
+                best_state = ema_model.state_dict() if ema_model is not None else model.state_dict()
+                torch.save(best_state, ckpt_dir / "best.pth")
                 print(f"  New best model saved (val_loss={avg_val_loss:.4f})")
 
         # === Save checkpoint ===
@@ -482,6 +580,8 @@ def train(args: argparse.Namespace) -> None:
         }
         if scheduler is not None:
             ckpt_data["scheduler_state_dict"] = scheduler.state_dict()
+        if ema_model is not None:
+            ckpt_data["ema_state_dict"] = ema_model.state_dict()
         torch.save(ckpt_data, ckpt_dir / "latest.pth")
 
         # Save periodic checkpoints

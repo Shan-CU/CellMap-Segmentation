@@ -20,6 +20,8 @@ from .partial_annotation import (
     BalancedSoftmaxTverskyLoss,
     build_partial_annotation_loss,
 )
+from .focal_tversky import FocalTverskyLoss, AsymmetricUnifiedFocalLoss
+from .boundary_loss import BoundaryWeightedTverskyLoss
 
 LOSS_REGISTRY: Dict[str, dict] = {}
 
@@ -192,6 +194,103 @@ def build_bst_masksup03_no_bbox(num_classes: int = 35, **kwargs) -> nn.Module:
         masksup_ratio=0.3,
         bbox_bg_weight=1.0,
         bbox_pad_fraction=0.0,
+    )
+
+
+# ============================================================================
+# 5. HIGH-α TVERSKY (precision-boosting, from R2 findings)
+# ============================================================================
+
+@register_loss("tversky_a08_b04", "Tversky α=0.8, β=0.4 (strong precision bias)")
+def build_tversky_a08_b04(num_classes: int = 35, **kwargs) -> nn.Module:
+    return PartialTverskyLoss(alpha=0.8, beta=0.4, num_classes=num_classes)
+
+
+@register_loss("tversky_a08_b06", "Tversky α=0.8, β=0.6 (precision + high FN penalty)")
+def build_tversky_a08_b06(num_classes: int = 35, **kwargs) -> nn.Module:
+    return PartialTverskyLoss(alpha=0.8, beta=0.6, num_classes=num_classes)
+
+
+# ============================================================================
+# 6. τ=2.0 (strong logit adjustment)
+# ============================================================================
+
+@register_loss("bst_tau20", "BalancedSoftmaxTversky with τ=2.0 (strong)")
+def build_bst_tau20(num_classes: int = 35, **kwargs) -> nn.Module:
+    return BalancedSoftmaxTverskyLoss(tau=2.0, num_classes=num_classes)
+
+
+# ============================================================================
+# 7. FOCAL TVERSKY LOSS (Abraham & Khan, 2019)
+#    (1 - Tversky)^γ — focuses training on hard classes/voxels
+# ============================================================================
+
+@register_loss("focal_tversky", "Focal Tversky (γ=0.75) — down-weights easy classes")
+def build_focal_tversky(
+    gamma: float = 0.75,
+    alpha: float = 0.6,
+    beta: float = 0.4,
+    num_classes: int = 35,
+    **kwargs,
+) -> nn.Module:
+    return FocalTverskyLoss(
+        gamma=gamma, alpha=alpha, beta=beta, num_classes=num_classes,
+    )
+
+
+@register_loss("focal_tversky_g05", "Focal Tversky (γ=0.5) — mild focal")
+def build_focal_tversky_g05(num_classes: int = 35, **kwargs) -> nn.Module:
+    return FocalTverskyLoss(gamma=0.5, alpha=0.6, beta=0.4, num_classes=num_classes)
+
+
+# ============================================================================
+# 8. ASYMMETRIC UNIFIED FOCAL LOSS (Yeung et al., MedIA 2022)
+#    Combines distribution-based (Focal Tversky) + region-based (Dice Focal)
+# ============================================================================
+
+@register_loss(
+    "unified_focal",
+    "Asymmetric Unified Focal Loss (Yeung 2022) — SOTA compound loss",
+)
+def build_unified_focal(
+    delta: float = 0.6,
+    gamma_dist: float = 0.75,
+    gamma_region: float = 0.75,
+    weight_dist: float = 0.5,
+    num_classes: int = 35,
+    **kwargs,
+) -> nn.Module:
+    return AsymmetricUnifiedFocalLoss(
+        delta=delta,
+        gamma_dist=gamma_dist,
+        gamma_region=gamma_region,
+        weight_dist=weight_dist,
+        num_classes=num_classes,
+    )
+
+
+# ============================================================================
+# 9. BOUNDARY-WEIGHTED TVERSKY (distance-transform upweighting near boundaries)
+# ============================================================================
+
+@register_loss(
+    "boundary_tversky",
+    "Boundary-weighted Tversky — upweights loss near membrane boundaries",
+)
+def build_boundary_tversky(
+    alpha: float = 0.6,
+    beta: float = 0.4,
+    boundary_weight: float = 5.0,
+    boundary_sigma: float = 3.0,
+    num_classes: int = 35,
+    **kwargs,
+) -> nn.Module:
+    return BoundaryWeightedTverskyLoss(
+        alpha=alpha,
+        beta=beta,
+        boundary_weight=boundary_weight,
+        boundary_sigma=boundary_sigma,
+        num_classes=num_classes,
     )
 
 

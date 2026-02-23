@@ -173,7 +173,6 @@ def get_dataloader(
         val_raw_value_transforms=val_raw_value_transforms,
         target_value_transforms=target_value_transforms,
         spatial_transforms=spatial_transforms,
-        device=device,
         class_relation_dict=class_relation_dict,
     )
 
