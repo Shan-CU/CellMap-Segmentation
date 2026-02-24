@@ -130,7 +130,7 @@ class BoundaryWeightedTverskyLoss(nn.Module):
         mask = self._annotation_mask
         self._annotation_mask = None
 
-        pred = torch.sigmoid(input)
+        pred = torch.sigmoid(input.float())  # float32 for AMP safety
         target = target.float()
         spatial_dims = tuple(range(2, input.ndim))
 

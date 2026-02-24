@@ -78,7 +78,7 @@ class PartialTverskyLoss(nn.Module):
         Returns:
             Per-channel loss tensor (B, C).
         """
-        pred = torch.sigmoid(input)
+        pred = torch.sigmoid(input.float())  # float32 for AMP safety
         target = target.float()
 
         spatial_dims = tuple(range(2, input.ndim))
@@ -264,7 +264,7 @@ class BalancedSoftmaxTverskyLoss(nn.Module):
         adj_shape = [1, self.num_classes] + [1] * (input.ndim - 2)
         adjusted_input = input - adj.view(*adj_shape)
 
-        pred = torch.sigmoid(adjusted_input)
+        pred = torch.sigmoid(adjusted_input.float())  # float32 for AMP safety
         spatial_dims = tuple(range(2, input.ndim))
 
         def _tversky_from_weights(w):

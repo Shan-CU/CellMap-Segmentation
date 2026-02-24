@@ -72,7 +72,7 @@ def build_dice_bce(bce_weight: float = 0.5, smooth: float = 1e-6, **kwargs) -> n
 
         def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
             bce = F.binary_cross_entropy_with_logits(input, target, reduction="mean")
-            pred = torch.sigmoid(input)
+            pred = torch.sigmoid(input.float())  # float32 for AMP safety
             spatial_dims = tuple(range(2, input.ndim))
             intersection = (pred * target).sum(dim=spatial_dims)
             union = pred.sum(dim=spatial_dims) + target.sum(dim=spatial_dims)
