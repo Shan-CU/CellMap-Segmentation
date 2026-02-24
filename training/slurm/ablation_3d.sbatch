@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ablation_3d
-#SBATCH --partition=l40-gpu
-#SBATCH --account=rc_cburch_pi
+#SBATCH --partition=h100_sn
+#SBATCH --account=rc_alain_pi
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=96G
