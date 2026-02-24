@@ -371,7 +371,7 @@ def train(args: argparse.Namespace) -> None:
     latest_ckpt = ckpt_dir / "latest.pth"
     if latest_ckpt.exists():
         print(f"Resuming from {latest_ckpt}")
-        ckpt = torch.load(latest_ckpt, map_location=device, weights_only=True)
+        ckpt = torch.load(latest_ckpt, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         start_epoch = ckpt["epoch"]
