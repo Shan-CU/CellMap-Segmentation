@@ -1,697 +1,540 @@
-# CellMap Segmentation — Experiment Progress
+# CellMap Segmentation — Experiment Progress & Handoff Document
 
-> **Last updated:** 2026-02-23 ~22:00 EST
-> **Status:** Phase 1 ablation — 2D nearly complete (25/29 done, 4 relaunched on L40S), 3D in progress (11 running, 22 pending on Sycamore H100)
+> **Last updated:** February 25, 2026  
+> **Author:** AI Agent (GitHub Copilot, Claude Opus 4.6)  
+> **Purpose:** Full context for any agent continuing this work
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [Infrastructure](#2-infrastructure)
+3. [Codebase Architecture](#3-codebase-architecture)
+4. [Phase 1 Results — Complete](#4-phase-1-results--complete)
+5. [Key Findings & Decisions](#5-key-findings--decisions)
+6. [In-Flight Experiments](#6-in-flight-experiments)
+7. [Phase 2 Plan — Architecture Comparison](#7-phase-2-plan--architecture-comparison)
+8. [Known Issues & Caveats](#8-known-issues--caveats)
+9. [File Reference](#9-file-reference)
+10. [How to Run Experiments](#10-how-to-run-experiments)
 
 ---
 
 ## 1. Project Overview
 
-We are competing in the **CellMap Segmentation Challenge (CSC)**, a multi-label volumetric segmentation benchmark for FIB-SEM electron microscopy. The goal is to segment **48 organelle classes** (derived from 35 atomic label classes) across 22 diverse biological samples.
+**Goal:** Multi-class organelle segmentation from FIB-SEM electron microscopy volumes for the [CellMap Segmentation Challenge](https://cellmapchallenge.janelia.org/).
 
-**Key challenge properties:**
-- **Partial annotations**: Each crop only labels a subset of classes. Unlabeled classes appear as NaN. A loss function must not penalize unannotated classes.
-- **Extreme class imbalance**: `ecs` (extracellular space) and `pm` (plasma membrane) dominate. Rare classes like `mt_out` (microtubule outer) or `ld_mem` (lipid droplet membrane) may appear in only a few crops.
-- **Multi-resolution zarr**: Raw EM data is stored as multi-scale zarr at resolutions from 4nm to 128nm. We train at 8nm isotropic.
-- **289 annotated crops** across 22 biological volumes, totaling ~42.3 billion voxels.
-- **Evaluation**: Per-class IoU on a held-out test set (48 classes tested on the leaderboard).
+**Task:** Predict 48 classes (31 atomic organelle labels + 17 group/composite labels) from 3D EM volumes stored in Zarr format at multiple resolutions. The challenge uses partial annotation — each crop only labels a subset of classes, with unannotated classes marked as NaN.
+
+**48 Classes:**
+```
+Atomic (31): ecs, pm, mito_mem, mito_lum, mito_ribo, golgi_mem, golgi_lum,
+  ves_mem, ves_lum, endo_mem, endo_lum, lyso_mem, lyso_lum, ld_mem, ld_lum,
+  er_mem, er_lum, eres_mem, eres_lum, ne_mem, ne_lum, np_out, np_in,
+  hchrom, echrom, nucpl, mt_out, cyto, mt_in, perox_mem, perox_lum
+Group (17): nuc, golgi, ves, endo, lyso, ld, eres, perox, mito, er, ne, np,
+  chrom, mt, cell, er_mem_all, ne_mem_all
+```
+
+**Dataset:** 968 training crops + 188 validation crops across 22 EM volumes. Zarr format loaded via `cellmap-data` library. Validation crops only annotate 14 of 48 classes, which means val_loss and per-class Dice are incomplete metrics.
+
+**Strategy:** Two-phase approach:
+- **Phase 1:** Quick ablation experiments (50 epochs, 500 iters/epoch) to find optimal loss, masking, and training technique
+- **Phase 2:** Architecture comparison (100 epochs, 1000 iters/epoch) with the winning configuration
 
 ---
 
-## 2. Architecture: NIfTI→Zarr Pipeline Overhaul
+## 2. Infrastructure
 
-### 2.1 What Changed
+### Clusters
 
-We replaced the original NIfTI-based MONAI data pipeline with a **native zarr pipeline** using the official `cellmap-data` library (v2026.2.20). This was a complete rewrite of the training infrastructure.
+| Cluster | Partition | GPU | VRAM | Host RAM | Account | Use |
+|---------|-----------|-----|------|----------|---------|-----|
+| Longleaf | `l40-gpu` | NVIDIA L40S | 48 GB | ~1 TB | `rc_cburch_pi` | 2D experiments |
+| Sycamore | `h100_sn` | NVIDIA H100 | 80 GB | ~1 TB | `rc_alain_pi` | 3D experiments |
+| Sycamore | `h100_mn` | NVIDIA H100 (multi) | 80 GB | ~1 TB | `rc_alain_pi` | ⚠️ Avoid — jobs get stuck |
 
-**Old pipeline (broken):**
-- Converted zarr crops → NIfTI files (lossy, slow, ~200GB disk)
-- Used MONAI's `CacheDataset` + `RandCropByPosNegLabel`
-- Only supported a subset of classes
-- Scale/resolution handling was incorrect for some volumes
+### Environment
 
-**New pipeline (current):**
-- Reads zarr directly via `cellmap_data.CellMapDataLoader`
-- Correct multi-resolution handling (8nm isotropic target)
-- All 35 atomic classes + 48 tested classes
-- `CellMapDataSplit` + `CellMapMultiDataset` with `weighted_sampler` for rare-class upsampling
-- `EmptyImage` placeholder tensors for classes not present in a given crop (value=-100, treated as NaN → annotation mask)
+```bash
+# Conda/Micromamba
+MAMBA_EXE='/nas/longleaf/home/gsgeorge/.local/bin/micromamba'
+MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+micromamba activate csc
 
-### 2.2 Key Files
+# Working directory
+cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
+```
+
+### Key Dependencies
+- `cellmap-data` v2026.2.20.2159 — Zarr data loading, spatial transforms, weighted sampling
+- `torch` — PyTorch with CUDA
+- `monai` — SegResNet, SwinUNETR architectures
+- `tensorboardX` — Logging
+
+---
+
+## 3. Codebase Architecture
+
+```
+CellMap-Segmentation/
+├── training/
+│   ├── train.py              # Main training script (CLI entry point)
+│   ├── configs/
+│   │   └── experiments.py    # All experiment configs as dataclasses
+│   ├── models/
+│   │   └── model_zoo.py      # Model registry (9 architectures)
+│   ├── losses/
+│   │   ├── loss_zoo.py       # Loss registry (20+ losses)
+│   │   └── partial_annotation.py  # NaN masking, fg masking, deep supervision
+│   ├── transforms/
+│   │   ├── __init__.py
+│   │   └── intensity.py      # Intensity augmentation (brightness, contrast, noise)
+│   ├── samplers/
+│   │   ├── __init__.py
+│   │   └── crop_weights.py   # Class-aware inverse-sqrt crop weighting
+│   ├── eval_2d_perclass.py   # Per-class Dice/IoU evaluation script
+│   └── slurm/
+│       ├── ablation_2d_l40s.sbatch   # 2D job template (Longleaf L40S)
+│       ├── ablation_3d_h100.sbatch   # 3D job template (Sycamore H100)
+│       └── launch_*.sh               # Batch launch scripts
+├── src/cellmap_segmentation_challenge/
+│   └── utils/
+│       └── dataloader.py     # get_dataloader() — wraps cellmap-data
+├── datasplit.csv             # Train/val split (968 train, 188 val crops)
+└── runs/ablation/            # All experiment outputs
+    ├── logs/                 # SLURM stdout/stderr
+    ├── <experiment_name>/
+    │   ├── config.json       # Saved hyperparameters
+    │   ├── checkpoints/      # latest.pth, best.pth, epoch_N.pth
+    │   └── tensorboard/      # TensorBoard event files
+    ├── eval_2d_perclass.json # Per-class Dice/IoU for all 2D experiments
+    └── eval_2d_perclass.csv  # Same in CSV format
+```
+
+### Model Registry (`training/models/model_zoo.py`)
+
+| Name | Dim | Params | Description |
+|------|-----|--------|-------------|
+| `resnet_2d` | 2D | ~7.8M | CSC FlexUNet-ResNet34 |
+| `unet_2d` | 2D | ~31M | CSC vanilla UNet |
+| `swin_2d` | 2D | ~36M | CSC SwinTransformer |
+| `vit_2d` | 2D | ~105M | CSC ViTVNet |
+| `segresnet_3d` | 3D | ~18M | MONAI SegResNetDS |
+| `swinunetr_3d` | 3D | ~62M | MONAI SwinUNETR |
+| `unet_3d` | 3D | - | CSC UNet 3D |
+| `resnet_3d` | 3D | - | CSC FlexUNet-ResNet34 3D |
+| `vitnet_3d` | 3D | - | CSC ViTVNet 3D |
+
+### Training Script Flags (`training/train.py`)
+
+Key flags beyond standard hyperparameters:
+```
+--use_foreground_mask / --no_foreground_mask   # Mask loss to non-background voxels
+--ema --ema_decay 0.999                        # Exponential moving average
+--deep_supervision --ds_weights ...            # Multi-scale supervision (SegResNet only)
+--no_weighted_sampler                          # Disable cellmap-data's weighted sampling
+--intensity_aug                                # Enable brightness/contrast/noise augmentation
+--class_aware_sampling                         # Use inverse-sqrt class-aware crop weighting
+--amp / --no_amp                               # Automatic mixed precision
+```
+
+---
+
+## 4. Phase 1 Results — Complete
+
+### Sweep A: Loss Function (2D, ResNet)
+
+| Experiment | Loss | Val Loss | Mean Dice | Rank |
+|------------|------|----------|-----------|------|
+| `loss_2d_bce` | BCE | **0.0425** | **0.479** | 🥇 |
+| `loss_2d_dice_bce` | Dice+BCE | 0.4656 | 0.462 | 🥈 |
+| `loss_2d_boundary_tversky` | Boundary Tversky | 0.6996 | 0.410 | 3 |
+| `loss_2d_tversky` | Tversky | 0.7136 | 0.393 | 4 |
+| `loss_2d_focal_tversky` | Focal Tversky | 0.5472 | 0.378 | 5 |
+| `loss_2d_unified_focal` | Unified Focal | 0.5473 | 0.372 | 6 |
+| `loss_2d_focal` | Focal | 0.5472 | 0.362 | 7 |
+| `loss_2d_balanced_softmax_tversky` | BST (τ=1.0) | 0.6055 | 0.240 | 8 |
+
+**Finding:** Simple losses (BCE, Dice+BCE) massively outperform complex losses. BST's τ=1.0 logit adjustment over-corrects with 48 classes, producing too many false positives on rare classes.
+
+**Decision:** `dice_bce` chosen for Phase 2 (not BCE) because dice_bce has better rare-class performance despite slightly lower mean Dice. BCE achieves high mean Dice by overpredicting common classes.
+
+### Sweep B: Tversky α/β (2D, ResNet)
+
+| Experiment | α | β | Mean Dice |
+|------------|---|---|-----------|
+| `tversky_2d_balanced` | 0.5 | 0.5 | 0.408 |
+| `tversky_2d_a08_b06` | 0.8 | 0.6 | 0.409 |
+| `tversky_2d_recall` | 0.3 | 0.7 | 0.409 |
+| `tversky_2d_precision_07_03` | 0.7 | 0.3 | 0.386 |
+| `tversky_2d_a08_b04` | 0.8 | 0.4 | 0.371 |
+| `tversky_2d_precision_06_04` | 0.6 | 0.4 | 0.374 |
+
+**Finding:** All Tversky variants clustered around 0.37–0.41 mean Dice. No α/β combination came close to BCE (0.479) or dice_bce (0.462). Tversky-based losses are suboptimal for this task.
+
+### Sweep C: Class Weighting τ (2D, ResNet, BST)
+
+| Experiment | τ | Val Loss | Mean Dice |
+|------------|---|----------|-----------|
+| `tau_2d_20` | 2.0 | 0.4090 | 0.000 |
+| `tau_2d_15` | 1.5 | 0.4094 | 0.000 |
+| `tau_2d_10` | 1.0 | 0.5444 | 0.133 |
+| `tau_2d_05` | 0.5 | 0.4252 | 0.408 |
+| `tau_2d_0` | 0.0 | 0.4252 | 0.323 |
+
+**Finding:** High τ completely destroys predictions (mean Dice = 0). τ=0.5 is best within BST family but still worse than dice_bce. Logit adjustment doesn't work well with partial annotations at 48 classes.
+
+### Sweep D: Masking Strategy (2D, ResNet, BST)
+
+| Experiment | Strategy | Mean Dice |
+|------------|----------|-----------|
+| `mask_2d_masksup03_no_bbox` | MaskSup λ=0.3, no bbox | 0.263 |
+| `mask_2d_fg_only` | FG mask only | 0.254 |
+| `mask_2d_none` | No masking | 0.250 |
+| `mask_2d_bbox_loose` | Loose bbox + FG | 0.240 |
+| `mask_2d_masksup03` | MaskSup λ=0.3 + bbox | 0.136 |
+| `mask_2d_bbox_only` | Bbox only | 0.134 |
+| `mask_2d_bbox_fg` | Bbox + FG | 0.133 |
+
+**Finding:** FG masking provides modest improvement. Bbox masking hurts when combined with BST (bbox over-constrains already over-adjusted logits). Best strategy is simple FG mask.
+
+### Sweep E: Training Techniques (2D, ResNet)
+
+**Original (with BST base loss):**
+
+| Experiment | Technique | Val Loss | Mean Dice |
+|------------|-----------|----------|-----------|
+| `tech_2d_ema` | EMA (decay=0.999) | 0.5603 | 0.102 |
+| `tech_2d_no_weighted_sampler` | No sampler | 0.5645 | 0.082 |
+| `tech_2d_focal_tversky_mild` | Focal γ=0.5 | 0.5709 | 0.325 |
+
+**Re-validated with dice_bce (winning loss):**
+
+| Experiment | Config | Val Loss | Notes |
+|------------|--------|----------|-------|
+| `tech_2d_dicebce_ema` | dice_bce + EMA + fg_mask + sampler | **0.112** | ⭐ **4× improvement over no-EMA (0.466)** |
+| `tech_2d_dicebce_no_sampler` | dice_bce + EMA + fg_mask, no sampler | **0.122** | Sampler helps ~9% |
+
+**Finding:** EMA is the single biggest improvement discovered. It smooths noisy gradients from the imbalanced 48-class partial annotation setup. Val loss dropped from 0.466 → 0.112 (4× better). Weighted sampler provides modest additional benefit (0.112 vs 0.122).
+
+### 3D Results (SegResNet baseline)
+
+| Experiment | Val Loss | Notes |
+|------------|----------|-------|
+| `loss_3d_dice_bce` | **0.170** | 🥇 Best 3D loss |
+| `loss_3d_bce` | 0.220 | Runner-up |
+| `mask_3d_bbox_only` | 0.541 | |
+| `tech_3d_deep_supervision` | 0.556 | Deep supervision helps SegResNet |
+| `tau_3d_20` | 0.597 | Partial result (was still running) |
+| `loss_3d_unified_focal` | 0.667 | |
+| `tech_3d_ema` | 0.691 | EMA with BST (not re-validated with dice_bce) |
+| `loss_3d_balanced_softmax_tversky` | 0.695 | BST fails in 3D too |
+| `mask_3d_bbox_fg` | 0.695 | |
+| `mask_3d_bbox_loose` | 0.695 | |
+| `loss_3d_boundary_tversky` | 0.720 | |
+| `loss_3d_focal` | 0.723 | |
+| `tech_3d_focal_tversky_mild` | 0.722 | |
+| `tversky_3d_a08_b06` | 0.730 | |
+| `tech_3d_no_weighted_sampler` | 0.736 | |
+| `loss_3d_tversky` | 0.740 | |
+| `tversky_3d_precision_06_04` | 0.740 | |
+| `tversky_3d_precision_07_03` | 0.747 | |
+| `mask_3d_masksup03` | 0.749 | |
+| `mask_3d_masksup03_no_bbox` | 0.749 | |
+| `tau_3d_0` | 0.777 | |
+| `tau_3d_05` | 0.777 | |
+| `tversky_3d_balanced` | 0.804 | |
+| `tversky_3d_recall` | 0.814 | |
+| `tversky_3d_a08_b04` | 0.919 | |
+| `mask_3d_fg_only` | PENDING | Job 1820948 still running |
+| `mask_3d_none` | PENDING | Job 1820947 still running |
+
+**Finding:** dice_bce wins in 3D too (0.170 vs next best 0.220). Same pattern as 2D — simple losses outperform complex ones. Deep supervision provides significant benefit for SegResNet (0.556 vs 0.695 for BST).
+
+---
+
+## 5. Key Findings & Decisions
+
+### Optimal Phase 2 Configuration
+
+```
+Loss:             dice_bce (bce_weight=0.5, smooth=1e-6)
+EMA:              enabled, decay=0.999
+FG Mask:          enabled
+Weighted Sampler: enabled (cellmap-data default)
+Intensity Aug:    TBD (waiting on val_intensity_aug results)
+Class-Aware:      TBD (waiting on val_crop_weights results)
+AMP:              enabled
+Scheduler:        cosine with 5-epoch warmup
+Optimizer:        RAdam, lr=1e-4
+```
+
+### Why dice_bce Over BCE
+
+BCE had the highest mean Dice (0.479 vs 0.462) but dice_bce was chosen because:
+1. dice_bce has better rare-class performance (the Dice component explicitly optimizes overlap)
+2. BCE achieves high mean Dice by over-predicting common classes (ecs, pm, mito)
+3. The challenge evaluation weights all classes equally, so rare-class performance matters
+4. With EMA, dice_bce reaches val_loss=0.112 — the best result by far
+
+### Why BST Failed
+
+Balanced Softmax Tversky (BST) uses logit adjustment: `logit_c += τ × log(π_c)` where π_c is the class prior. With 48 classes (many extremely rare), τ=1.0 drastically over-adjusts logits for rare classes, causing massive false positive rates. This is the opposite of its intended effect — it was designed for natural image classification with ~1000 balanced classes, not medical segmentation with 48 extremely imbalanced classes.
+
+### EMA's Outsized Impact
+
+EMA (exponential moving average) provided a 4× val_loss improvement (0.466 → 0.112). Hypothesis: with 48 partially-annotated classes, gradients are extremely noisy epoch-to-epoch (different crops annotate different classes). EMA acts as a temporal ensemble, smoothing these noisy updates. This is consistent with nnU-Net v2 and MONAI Auto3DSeg both using EMA by default.
+
+---
+
+## 6. In-Flight Experiments
+
+### Validation: Data Loading Improvements (Longleaf L40S)
+
+These validate features cherry-picked from the OrganelleSeg repo (coworker Greg's pipeline):
+
+| Job ID | Name | Config | Status | Expected Finish |
+|--------|------|--------|--------|-----------------|
+| 33019765 | `val_intensity_aug` | dice_bce + EMA + fg_mask + **intensity aug** | RUNNING (~1h in) | ~4-5h from submission |
+| 33019782 | `val_crop_weights` | dice_bce + EMA + fg_mask + **class-aware sampling** | RUNNING (~1h in) | ~4-5h from submission |
+| 33019784 | `val_combined` | dice_bce + EMA + fg_mask + **both** | RUNNING (~1h in) | ~4-5h from submission |
+
+**Baseline:** `tech_2d_dicebce_ema` → val_loss = 0.112
+
+**Intensity augmentation** (`--intensity_aug`):
+- RandomBrightness ±0.1, RandomContrast 0.8–1.2, RandomGaussianNoise σ=0.01–0.05
+- Applied to raw EM inputs via `train_raw_value_transforms` (train only, not val)
+- Rationale: EM data has natural intensity variation across sections; augmentation should improve generalization
+
+**Class-aware crop weighting** (`--class_aware_sampling`):
+- Replaces default weighted sampler with inverse-sqrt class-aware weighting
+- `weight(crop) = 0.7 × mean(1/√(global_count(c))) + 0.3 × uniform`
+- Rationale: upweight crops containing rare organelles (NE, peroxisomes, MT-inner)
+
+### Remaining 3D Ablations (Sycamore H100)
+
+| Job ID | Name | Status | Expected Finish |
+|--------|------|--------|-----------------|
+| 1820946 | `tau_3d_20` | RUNNING (~9h in) | ~3-6h from now |
+| 1820947 | `mask_3d_none` | RUNNING (~9h in) | ~3-6h from now |
+| 1820948 | `mask_3d_fg_only` | RUNNING (~9h in) | ~3-6h from now |
+
+---
+
+## 7. Phase 2 Plan — Architecture Comparison
+
+### Configuration
+
+Once validation experiments complete, finalize the Phase 2 base config:
+
+```python
+# In training/configs/experiments.py
+loss = "dice_bce"
+use_foreground_mask = True
+ema = True
+ema_decay = 0.999
+epochs = 100              # 2× ablation
+iterations_per_epoch = 1000  # 2× ablation
+val_every_n_epochs = 5
+intensity_aug = TBD       # Include if val_intensity_aug ≤ 0.112
+class_aware_sampling = TBD  # Include if val_crop_weights ≤ 0.112
+```
+
+### ⚠️ IMPORTANT: Update Phase 2 Defaults Before Launching
+
+The `make_arch_comparison_2d()` and `make_arch_comparison_3d()` functions in `training/configs/experiments.py` still have `loss="balanced_softmax_tversky"` as default. **These MUST be updated to `loss="dice_bce"` before launching Phase 2.**
+
+Similarly, `training/slurm/launch_arch_comparison.sh` has `BEST_LOSS="balanced_softmax_tversky"` — also needs updating.
+
+### 2D Runs (Longleaf L40S)
+
+| Model | Est. Time | Input Shape | Params |
+|-------|-----------|-------------|--------|
+| `resnet_2d` (FlexUNet-ResNet34) | ~6h | [1, 256, 256] | ~7.8M |
+| `unet_2d` | ~5h | [1, 256, 256] | ~31M |
+| `swin_2d` (SwinTransformer) | ~10h | [1, 256, 256] | ~36M |
+| `vit_2d` (ViTVNet) | ~10h | [1, 256, 256] | ~105M |
+
+### 3D Runs (Sycamore H100 — `h100_sn` ONLY)
+
+| Model | Est. Time | Input Shape | Batch | Params |
+|-------|-----------|-------------|-------|--------|
+| `segresnet_3d` (SegResNetDS) | ~24h | [128, 128, 128] | 2 | ~18M |
+| `swinunetr_3d` (SwinUNETR) | ~36h | [128, 128, 128] | 2 | ~62M |
+| `unet_3d` | ~18h | [128, 128, 128] | 2 | - |
+| `resnet_3d` | ~20h | [128, 128, 128] | 2 | - |
+
+### Launch Commands
+
+```bash
+# 2D on Longleaf (repeat for each model: resnet_2d, unet_2d, swin_2d, vit_2d)
+ssh longleaf.unc.edu 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
+  EXPERIMENT_NAME=arch_2d_resnet MODEL_NAME=resnet_2d LOSS_NAME=dice_bce \
+  USE_FG_MASK=true EPOCHS=100 ITERS=1000 \
+  EXTRA_ARGS="--ema --ema_decay 0.999 --val_every_n_epochs 5" \
+  sbatch --export=ALL --job-name=arch_2d_resnet training/slurm/ablation_2d_l40s.sbatch'
+
+# 3D on Sycamore (repeat for each model: segresnet_3d, swinunetr_3d, unet_3d, resnet_3d)
+ssh sycamore 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
+  EXPERIMENT_NAME=arch_3d_segresnet MODEL_NAME=segresnet_3d LOSS_NAME=dice_bce \
+  USE_FG_MASK=true EPOCHS=100 ITERS=500 BATCH_SIZE=2 \
+  EXTRA_ARGS="--ema --ema_decay 0.999 --val_every_n_epochs 5 --input_shape 128 128 128" \
+  sbatch --export=ALL --job-name=arch_3d_segresnet \
+  --partition=h100_sn --account=rc_alain_pi \
+  training/slurm/ablation_3d_h100.sbatch'
+```
+
+Add `--intensity_aug` and/or `--class_aware_sampling` to `EXTRA_ARGS` if validation results are positive.
+
+---
+
+## 8. Known Issues & Caveats
+
+### Validation Set Limitation
+The validation crops only annotate **14 of 48 classes**: ecs, pm, mito_mem, mito_lum, mito_ribo, golgi_mem, golgi_lum, ves_mem, ves_lum, endo_mem, endo_lum, er_mem, er_lum, nuc. The remaining 34 classes (including all group classes) cannot be evaluated during training. This means:
+- `val_loss` only measures performance on 14 classes
+- Per-class Dice is missing for 34 classes
+- The true challenge leaderboard score could differ significantly from val metrics
+
+### Sycamore h100_mn Partition
+Jobs on `h100_mn` (multi-node) partition tend to get stuck in PENDING indefinitely. Always use `h100_sn` (single-node) for Sycamore jobs.
+
+### AMP Overflow with BST
+BST with AMP float16 can produce inf logits due to the τ×log(π_c) adjustment for very rare classes. This was fixed by adding `nan_to_num()` clamping, but is irrelevant now that we've moved to dice_bce.
+
+### cellmap-data EmptyImage Memory
+cellmap-data pre-allocates `EmptyImage` tensors for all ~784 datasets on initialization. This requires ~300GB host RAM. Jobs must request ≥384G memory. Data should be loaded on CPU (`device="cpu"` in get_dataloader) and batches moved to GPU in the training loop.
+
+### Git State
+As of commit `e5d9f92` (Feb 25, 2026):
+- All Phase 1 infrastructure is committed
+- Intensity augmentation and class-aware sampling are committed
+- 3 validation experiment configs are committed
+- Phase 2 defaults still reference BST (need updating before Phase 2 launch)
+
+---
+
+## 9. File Reference
+
+### Key Files to Read
 
 | File | Purpose |
 |------|---------|
-| `training/train.py` | Main training script (~600 lines). Handles data loading, training loop, validation, checkpointing. |
-| `training/losses/partial_annotation.py` | `PartialTverskyLoss` and `BalancedSoftmaxTverskyLoss` — our core losses |
-| `training/losses/focal_tversky.py` | `FocalTverskyLoss` and `AsymmetricUnifiedFocalLoss` |
-| `training/losses/boundary_loss.py` | `BoundaryWeightedTverskyLoss` — upweights near membranes |
-| `training/losses/loss_zoo.py` | Registry of 22 loss configurations (builders + names) |
-| `training/models/model_zoo.py` | Registry of 8 models (4 × 2D, 4 × 3D) |
-| `training/configs/experiments.py` | All 59 experiment definitions as `ExperimentConfig` dataclasses |
-| `training/slurm/ablation_2d_l40s.sbatch` | SLURM job template for 2D experiments (Longleaf L40S) |
-| `training/slurm/ablation_2d_h100.sbatch` | SLURM job template for 2D experiments (Sycamore H100, used for original batch) |
-| `training/slurm/ablation_3d_h100.sbatch` | SLURM job template for 3D experiments (Sycamore H100) |
-| `training/slurm/launch_ablation_2d_h100.sh` | Launches all 29 2D experiments |
-| `training/slurm/launch_ablation_3d_h100.sh` | Launches all 30 3D experiments |
-| `datasplit.csv` | Train/val split (1156 entries — each row is a crop×class group) |
+| `training/train.py` | Main training loop — understand all flags and data flow |
+| `training/configs/experiments.py` | All experiment configs — modify for Phase 2 |
+| `training/losses/loss_zoo.py` | Loss function registry — `dice_bce` is the winner |
+| `training/models/model_zoo.py` | Model registry — 9 architectures |
+| `training/eval_2d_perclass.py` | Per-class evaluation — run after training |
+| `training/transforms/intensity.py` | Intensity augmentation implementation |
+| `training/samplers/crop_weights.py` | Class-aware sampling implementation |
+| `src/cellmap_segmentation_challenge/utils/dataloader.py` | `get_dataloader()` wrapper |
+| `runs/ablation/eval_2d_perclass.json` | Full per-class Dice/IoU results for all 2D experiments |
 
-### 2.3 Data Flow
+### Key Results Files
 
-```
-datasplit.csv
-    ↓
-cellmap_data.CellMapDataLoader(
-    datasplit_path, classes, input_array_info, target_array_info,
-    spatial_transforms, weighted_sampler, device="cpu"
-)
-    ↓
-CellMapMultiDataset → per-crop CellMapDataset
-    → Each dataset has input_arrays (EM) + target_arrays (per-class labels)
-    → Missing classes → EmptyImage(value=-100, shape=patch_shape)
-    ↓
-DataLoader(num_workers=8, batch_size=B)
-    ↓
-Training loop: batch[input_key].to("cuda"), batch[target_key].to("cuda")
-    → NaN in targets → annotation_mask (B, C) — 1=annotated, 0=skip
-    → targets.nan_to_num(0.0) → clean targets for loss
-    → loss_fn.set_annotation_mask(mask); loss_fn(logits, targets_clean)
-```
-
-### 2.4 The `device="cpu"` Fix
-
-`cellmap_data` creates `EmptyImage` objects for every (dataset × missing_class) combination. Each pre-allocates a full-size tensor (`torch.ones(patch_shape) * -100`). With ~784 training datasets and 48 classes, most slots are empty, creating ~41,000 `EmptyImage` tensors.
-
-- **2D** (1×256×256): 0.25 MB each → ~10 GB total → fits in 384 GB
-- **3D** (128×128×128): 8 MB each → ~321 GB total → needs 512 GB
-
-We pass `device="cpu"` to `get_dataloader()` so these tensors stay on host RAM (not GPU VRAM). The training loop moves each batch to GPU individually.
+| File | Content |
+|------|---------|
+| `runs/ablation/<exp>/config.json` | Hyperparameters used |
+| `runs/ablation/<exp>/checkpoints/best.pth` | Best model weights (EMA if enabled) |
+| `runs/ablation/<exp>/tensorboard/` | Training curves |
+| `runs/ablation/logs/<jobname>_<jobid>.out` | SLURM stdout with val_loss history |
+| `runs/ablation/eval_2d_perclass.json` | Per-class metrics (2D Phase 1 only) |
 
 ---
 
-## 3. Loss Functions
+## 10. How to Run Experiments
 
-### 3.1 Partial Annotation Handling
-
-All our custom losses support **partial annotation masking**:
-
-1. `cellmap_data` returns NaN for unannotated classes
-2. `get_annotation_mask_from_targets(targets)` → `(B, C)` binary mask (1 if channel has any non-NaN)
-3. `loss_fn.set_annotation_mask(mask)` → loss is computed only on annotated channels
-4. For losses that don't support explicit masks (BCE, Focal, Dice+BCE), we use CSC-style NaN masking: `(loss * ~isnan).sum() / ~isnan.sum()`
-
-### 3.2 Loss Registry
-
-| Name | Type | Description |
-|------|------|-------------|
-| `bce` | Baseline | `BCEWithLogitsLoss` (CSC default) |
-| `focal` | Baseline | Focal loss (γ=2.0) — down-weights easy examples |
-| `dice_bce` | Baseline | 50/50 Dice + BCE combination |
-| `tversky` | Core | Per-channel Tversky (α=0.6, β=0.4) with annotation masking |
-| `balanced_softmax_tversky` | **Our Best** | Logit-adjusted Tversky + bbox masking + foreground masking |
-| `focal_tversky` | Advanced | `(1 - Tversky)^γ` (γ=0.75) — focal on hard classes |
-| `focal_tversky_g05` | Advanced | Same with mild γ=0.5 |
-| `unified_focal` | Advanced | Asymmetric Unified Focal (Yeung 2022) — Focal Tversky + Dice Focal |
-| `boundary_tversky` | Advanced | Tversky + Gaussian boundary upweighting (σ=3, weight=5×) |
-| `tversky_balanced` | α/β variant | α=0.5, β=0.5 (= Dice) |
-| `tversky_precision` | α/β variant | α=0.7, β=0.3 (precision bias) |
-| `tversky_recall` | α/β variant | α=0.3, β=0.7 (recall bias) |
-| `tversky_a08_b04` | α/β variant | α=0.8, β=0.4 (strong precision) |
-| `tversky_a08_b06` | α/β variant | α=0.8, β=0.6 (precision + high FN penalty) |
-| `bst_tau0` | τ variant | BalancedSoftmaxTversky with τ=0 (no adjustment) |
-| `bst_tau05` | τ variant | τ=0.5 |
-| `bst_tau15` | τ variant | τ=1.5 |
-| `bst_tau20` | τ variant | τ=2.0 (strong) |
-| `bst_no_bbox` | Mask variant | No bbox masking (bbox_bg_weight=1.0) |
-| `bst_bbox_loose` | Mask variant | Loose bbox (pad=0.2, bg_weight=0.1) |
-| `bst_masksup03` | Mask variant | Mask-supervised reconstruction (ratio=0.3) |
-| `bst_masksup03_no_bbox` | Mask variant | masksup=0.3 but no bbox |
-
-### 3.3 BalancedSoftmaxTverskyLoss (our flagship)
-
-This is our most sophisticated loss. It combines:
-
-1. **Logit adjustment** (Balanced Softmax): `adjusted_logit_c = logit_c − τ·(log(n_c) − mean(log(n)))` where `n_c` is accumulated foreground count per class. This shifts the decision boundary to compensate for class imbalance. `τ` controls strength (0 = off, 2.0 = very strong).
-
-2. **Per-channel Tversky** (α=0.6, β=0.4): Penalizes FP more than FN to boost precision.
-
-3. **Spatial bounding-box masking**: For each annotated class, computes the tight bounding box of foreground voxels, pads by `bbox_pad_fraction`, assigns weight=1.0 inside and `bbox_bg_weight` (0.05) outside. This prevents false-positive penalty on background regions far from any annotated object.
-
-4. **Foreground masking**: Zeros loss on black padding regions (EM intensity < 0.01 threshold).
-
-5. **Mask-supervised reconstruction** (optional): Randomly masks `masksup_ratio` of annotated voxels and adds a reconstruction Tversky loss — forces the model to predict masked-out annotations from context.
-
-### 3.4 AMP Float16 NaN Fix (Resolved)
-
-`FocalTverskyLoss` and `AsymmetricUnifiedFocalLoss` compute `(1 - tversky)^γ` where γ is fractional (0.75). Two interacting bugs caused complete model corruption:
-
-1. **Forward pass NaN**: Under AMP float16, the Tversky index can slightly exceed 1.0, making the base of `pow()` negative → NaN.
-2. **Backward pass gradient explosion**: The derivative of x^γ is γ·x^(γ-1), which → ∞ as x → 0 when γ < 1. In float16 this becomes inf, poisoning all model weights with NaN within ~7 epochs.
-3. **Silent 0.0 "best" overwrite**: When all val batches produce NaN, `val_steps=0` → `avg_val_loss = 0/1 = 0.0`, which beat any real val loss, so a 100%-NaN model was saved as `best.pth`.
-
-**Fix (3 parts, all committed):**
-- `focal_tversky.py`: Cast `input` to **float32** before `sigmoid()` (exits AMP autocast), add **`eps=1e-6`** lower clamp: `.clamp(min=eps, max=1.0).pow(gamma)` — bounds the backward gradient.
-- `focal_tversky.py`: Same fix for `AsymmetricUnifiedFocalLoss`.
-- `train.py`: Guard best-model save with `val_steps > 0` — 0-batch validation cannot overwrite a real checkpoint.
-- Also applied `.float()` to sigmoid calls in `loss_zoo.py` (line 75), `partial_annotation.py` (lines 81, 267), `boundary_loss.py` (lines 133-134).
-
-**NaN-skip guards** (safety net, should no longer trigger):
-- Training loop: `if not torch.isfinite(loss): optimizer.zero_grad(); continue`
-- Validation loop: `if torch.isfinite(vloss): val_loss += vloss.item(); val_steps += 1`
-
----
-
-## 4. Models
-
-### 4.1 Model Registry
-
-| Name | Dim | Params | Source | Description |
-|------|-----|--------|--------|-------------|
-| `resnet_2d` | 2D | 7.8M | CSC | ResNet with 6 blocks, 2 downsampling layers, ngf=64 |
-| `unet_2d` | 2D | 31M | CSC | Standard U-Net |
-| `swin_2d` | 2D | 36M | CSC | Swin Transformer |
-| `vit_2d` | 2D | 105M | CSC | ViT-VNet |
-| `segresnet_3d` | 3D | 20M | MONAI | SegResNetDS (blocks_down=[1,2,2,4]) |
-| `swinunetr_3d` | 3D | 62M | MONAI | SwinUNETR |
-| `unet_3d` | 3D | — | CSC | UNet 3D |
-| `resnet_3d` | 3D | — | CSC | ResNet 3D |
-
-### 4.2 Phase 1 Baselines
-
-- **2D baseline**: `resnet_2d` (7.8M params) — fast, input_shape=[1, 256, 256], batch_size=8
-- **3D baseline**: `segresnet_3d` (20M params) — MONAI SegResNetDS, input_shape=[128, 128, 128], batch_size=1
-
----
-
-## 5. Experiment Design
-
-### 5.1 Ablation Structure
-
-**59 experiments** across **5 sweeps**, each run in **2D and 3D**:
-
-| Sweep | What it tests | # Experiments | 2D model | 3D model |
-|-------|---------------|---------------|----------|----------|
-| **A: Loss Function** | Which base loss performs best | 8 | resnet_2d | segresnet_3d |
-| **B: Tversky α/β** | Precision-recall tradeoff | 6 | resnet_2d | segresnet_3d |
-| **C: Class Weighting (τ)** | How much logit adjustment helps | 5 | resnet_2d | segresnet_3d |
-| **D: Masking Strategy** | Spatial masking configurations | 7 | resnet_2d | segresnet_3d |
-| **E: Training Techniques** | EMA, sampler, deep supervision | 3 (2D) + 4 (3D) | resnet_2d | segresnet_3d |
-
-All experiments hold constant: 50 epochs, 500 iters/epoch, lr=1e-4, RAdam optimizer, cosine LR with 5-epoch warmup, AMP float16, grad clipping 1.0, seed 42.
-
-### 5.2 How Sweeps Compose
-
-The sweeps are designed to be **composable** — each tests one axis independently:
-
-1. **Sweep A** → picks the best **base loss** (e.g., `balanced_softmax_tversky` vs `focal_tversky`)
-2. **Sweep B** → picks the best **α/β** for Tversky-family losses
-3. **Sweep C** → picks the best **τ** for logit adjustment
-4. **Sweep D** → picks the best **masking** strategy (bbox, foreground, masksup)
-5. **Sweep E** → picks which **training techniques** help (EMA, sampler, deep supervision)
-
-The winning combination from each sweep becomes the **Phase 2 baseline** for architecture comparison.
-
-Example composition: If A→`balanced_softmax_tversky`, B→`α=0.8,β=0.4`, C→`τ=2.0`, D→`bbox_loose + fg`, E→`EMA`, then the Phase 2 config is:
-```
-BalancedSoftmaxTverskyLoss(tau=2.0, alpha=0.8, beta=0.4, bbox_pad_fraction=0.2, bbox_bg_weight=0.1)
-+ foreground_mask=True + EMA(decay=0.999)
-```
-
-### 5.3 Sweep Details
-
-#### Sweep A: Loss Function (8 experiments)
-
-| Experiment | Loss | Key Difference |
-|------------|------|----------------|
-| `loss_{2d,3d}_bce` | BCEWithLogitsLoss | CSC default, per-voxel, no class awareness |
-| `loss_{2d,3d}_focal` | Focal (γ=2.0) | Down-weights easy voxels |
-| `loss_{2d,3d}_dice_bce` | Dice + BCE | Region-based + voxel-based combo |
-| `loss_{2d,3d}_tversky` | Tversky (α=0.6, β=0.4) | Precision-biased region loss |
-| `loss_{2d,3d}_balanced_softmax_tversky` | BST (τ=1.0) | Full pipeline: logit adj + bbox + fg mask |
-| `loss_{2d,3d}_focal_tversky` | FocalTversky (γ=0.75) | Focal modulation on hard classes |
-| `loss_{2d,3d}_unified_focal` | AsymUnifiedFocal | SOTA compound: FocalTversky + DiceFocal |
-| `loss_{2d,3d}_boundary_tversky` | BoundaryTversky | Distance-transform upweighting near membranes |
-
-#### Sweep B: Tversky α/β (6 experiments)
-
-| Experiment | α | β | Bias |
-|------------|---|---|------|
-| `tversky_{2d,3d}_balanced` | 0.5 | 0.5 | Neutral (= Dice) |
-| `tversky_{2d,3d}_precision_06_04` | 0.6 | 0.4 | Mild precision |
-| `tversky_{2d,3d}_precision_07_03` | 0.7 | 0.3 | Moderate precision |
-| `tversky_{2d,3d}_recall` | 0.3 | 0.7 | Recall bias |
-| `tversky_{2d,3d}_a08_b04` | 0.8 | 0.4 | Strong precision |
-| `tversky_{2d,3d}_a08_b06` | 0.8 | 0.6 | Precision + high FN penalty |
-
-#### Sweep C: Class Weighting τ (5 experiments)
-
-All use `BalancedSoftmaxTverskyLoss` with different τ:
-
-| Experiment | τ | Effect |
-|------------|---|--------|
-| `tau_{2d,3d}_0` | 0.0 | No logit adjustment (plain Tversky + bbox) |
-| `tau_{2d,3d}_05` | 0.5 | Mild adjustment |
-| `tau_{2d,3d}_10` | 1.0 | Default (= `balanced_softmax_tversky`) |
-| `tau_{2d,3d}_15` | 1.5 | Strong adjustment |
-| `tau_{2d,3d}_20` | 2.0 | Very strong adjustment |
-
-#### Sweep D: Masking Strategy (7 experiments)
-
-All use `BalancedSoftmaxTverskyLoss` variants:
-
-| Experiment | Foreground Mask | BBox Mask | Masksup | Description |
-|------------|----------------|-----------|---------|-------------|
-| `mask_{2d,3d}_none` | ❌ | ❌ | ❌ | No masking at all |
-| `mask_{2d,3d}_fg_only` | ✅ | ❌ | ❌ | Only foreground (black padding) mask |
-| `mask_{2d,3d}_bbox_only` | ❌ | ✅ | ❌ | Only bbox spatial mask |
-| `mask_{2d,3d}_bbox_fg` | ✅ | ✅ | ❌ | Bbox + foreground (the default BST config) |
-| `mask_{2d,3d}_bbox_loose` | ✅ | ✅ (loose) | ❌ | Wider bbox (pad=0.2, bg=0.1) |
-| `mask_{2d,3d}_masksup03` | ✅ | ✅ | ✅ (0.3) | Mask-supervised reconstruction |
-| `mask_{2d,3d}_masksup03_no_bbox` | ✅ | ❌ | ✅ (0.3) | Masksup without bbox |
-
-#### Sweep E: Training Techniques (3 2D + 4 3D)
-
-| Experiment | Technique | Description |
-|------------|-----------|-------------|
-| `tech_{2d,3d}_ema` | EMA (decay=0.999) | Exponential moving average of weights |
-| `tech_{2d,3d}_no_weighted_sampler` | Uniform sampling | Disables rare-class upsampling |
-| `tech_{2d,3d}_focal_tversky_mild` | FocalTversky γ=0.5 | Milder focal than sweep A's γ=0.75 |
-| `tech_3d_deep_supervision` | Deep supervision | SegResNetDS with dsdepth=4 (3D only) |
-
----
-
-## 6. Infrastructure
-
-### 6.1 Clusters
-
-We use **two partitions on the UNC condo cluster** that share the same `/work` filesystem:
-
-| Cluster | Partition | Account | GPUs | Use Case |
-|---------|-----------|---------|------|----------|
-| **Sycamore** (`sycamore-login1`) | `h100_sn` | `rc_alain_pi` | NVIDIA H100 80GB | 3D jobs (need 512GB RAM + H100 VRAM) |
-| **Longleaf** (`longleaf.unc.edu`) | `l40-gpu` | `rc_cburch_pi` | NVIDIA L40S 48GB | 2D jobs (fit easily, frees H100 for 3D) |
-
-**Important:** To submit jobs to Longleaf L40S from Sycamore, you must `ssh longleaf.unc.edu` first. The sbatch files are on the shared filesystem but the SLURM schedulers are separate.
+### Submit a Single Experiment
 
 ```bash
-# Submit 2D jobs (from Sycamore):
-ssh longleaf.unc.edu "cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=... LOSS_NAME=... sbatch --job-name=... training/slurm/ablation_2d_l40s.sbatch"
+# Via SSH to Longleaf (2D)
+ssh longleaf.unc.edu 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
+  EXPERIMENT_NAME=<name> MODEL_NAME=<model> LOSS_NAME=<loss> \
+  USE_FG_MASK=true EXTRA_ARGS="--ema --ema_decay 0.999" \
+  sbatch --export=ALL --job-name=<name> training/slurm/ablation_2d_l40s.sbatch'
 
-# Submit 3D jobs (on Sycamore directly):
-EXPERIMENT_NAME=... LOSS_NAME=... sbatch --job-name=... training/slurm/ablation_3d_h100.sbatch
+# Via SSH to Sycamore (3D) — ALWAYS use h100_sn
+ssh sycamore 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
+  EXPERIMENT_NAME=<name> MODEL_NAME=<model> LOSS_NAME=<loss> \
+  USE_FG_MASK=true BATCH_SIZE=2 \
+  EXTRA_ARGS="--ema --ema_decay 0.999 --input_shape 128 128 128" \
+  sbatch --export=ALL --job-name=<name> \
+  --partition=h100_sn --account=rc_alain_pi \
+  training/slurm/ablation_3d_h100.sbatch'
 ```
 
-### 6.2 SLURM Configuration
+### Check Job Status
 
-| Parameter | 2D Jobs (L40S) | 3D Jobs (H100) |
-|-----------|----------------|-----------------|
-| Partition | `l40-gpu` (Longleaf) | `h100_sn` (Sycamore) |
-| Account | `rc_cburch_pi` | `rc_alain_pi` |
-| QOS | `gpu_access` | (default) |
-| GPUs | 1× L40S | 1× H100 |
-| CPUs | 16 | 32 |
-| RAM | 384 GB | **512 GB** |
-| Time limit | 3 days | 3 days |
-| Batch size | 8 | 1 |
-| Input shape | 1×256×256 | 128×128×128 |
-| num_workers | 8 | 8 |
-| Wall time | ~3 hours | ~8-15 hours (est.) |
-
-The 3D jobs need 512 GB because EmptyImage tensors at 128³ consume ~321 GB of host RAM.
-
-### 6.3 SLURM Sbatch Files — CRITICAL NOTES
-
-⚠️ **DO NOT use `training/slurm/ablation_3d.sbatch`** — it has only 96G mem (will OOM) and a buggy `LOSS_KWARGS="{}"` default that causes bash brace expansion errors. Always use **`ablation_3d_h100.sbatch`** (512G mem, `LOSS_KWARGS="${LOSS_KWARGS:-}"` empty default).
-
-⚠️ **For 2D relaunches, use `ablation_2d_l40s.sbatch`** via SSH to Longleaf to keep H100s free for 3D.
-
-### 6.4 Output Structure
-
-```
-runs/ablation/
-├── logs/
-│   ├── abl_{experiment_name}_{jobid}.out   # stdout (training progress)
-│   └── abl_{experiment_name}_{jobid}.err   # stderr (warnings, errors)
-├── {experiment_name}/
-│   ├── config.json                         # Full argparse config
-│   ├── checkpoints/
-│   │   ├── best.pth                        # Best val_loss model state
-│   │   ├── latest.pth                      # Resume checkpoint
-│   │   └── epoch_{N}.pth                   # Periodic (every 10 epochs)
-│   └── tensorboard/
-│       └── events.out.tfevents.*           # TensorBoard logs
-```
-
----
-
-## 7. Results (Phase 1 — 2D)
-
-### 7.1 Status Summary
-
-| Category | Count | Details |
-|----------|-------|---------|
-| 2D completed (clean) | **25/29** | All converged at 50 epochs with valid val_loss |
-| 2D relaunched (in queue) | **4** | On Longleaf L40S — see §9 for job IDs |
-| 3D running | **11** | On Sycamore H100 — see §9 |
-| 3D pending | **22** | Queued on Sycamore H100 — see §9 |
-
-### 7.2 2D Validation Loss Results
-
-**⚠️ IMPORTANT: Validation losses are NOT directly comparable across different loss function families.** BCE/Focal operate on different scales than Tversky-family losses. Within each sweep, losses ARE comparable since they use the same loss function with different hyperparameters. True comparison requires downstream metrics (per-class IoU on held-out data).
-
-#### Sweep A: Loss Function
-
-| Experiment | Best Val Loss | Notes |
-|------------|:------------:|-------|
-| `loss_2d_bce` | 0.0425 | BCE scale (very different from Tversky) |
-| `loss_2d_focal` | 0.0023 | Focal scale (even smaller) |
-| `loss_2d_dice_bce` | 0.4656 | Dice+BCE scale |
-| `loss_2d_tversky` | 0.7136 | Tversky baseline |
-| `loss_2d_balanced_softmax_tversky` | 0.6055 | BST with all features |
-| `loss_2d_focal_tversky` | ⏳ | **Relaunched** (Longleaf 32626772) — NaN-corrupted, now fixed |
-| `loss_2d_unified_focal` | ⏳ | **Relaunched** (Longleaf 32626774) — NaN-corrupted, now fixed |
-| `loss_2d_boundary_tversky` | 0.6996 | Slight improvement over plain Tversky |
-
-*Original runs of focal_tversky and unified_focal appeared to complete 50 epochs but produced NaN-corrupted best.pth (val_loss=0.0000, 9/10 val batches skipped as NaN). Corrupted output dirs were cleaned and relaunched with the float32+epsilon fix.*
-
-#### Sweep B: Tversky α/β
-
-| Experiment | α | β | Best Val Loss |
-|------------|---|---|:------------:|
-| `tversky_2d_balanced` | 0.5 | 0.5 | 0.6950 |
-| **`tversky_2d_precision_06_04`** | **0.6** | **0.4** | **0.5614** |
-| `tversky_2d_precision_07_03` | 0.7 | 0.3 | 0.6442 |
-| `tversky_2d_recall` | 0.3 | 0.7 | 0.6773 |
-| `tversky_2d_a08_b04` | 0.8 | 0.4 | 0.5712 |
-| `tversky_2d_a08_b06` | 0.8 | 0.6 | 0.7274 |
-
-**Winner:** `α=0.6, β=0.4` (the default) has the lowest val loss at 0.5614. Strong precision (α=0.8) with moderate β=0.4 is competitive at 0.5712.
-
-#### Sweep C: Class Weighting (τ)
-
-| Experiment | τ | Best Val Loss |
-|------------|---|:------------:|
-| `tau_2d_0` | 0.0 | 0.5225 |
-| `tau_2d_05` | 0.5 | 0.4252 |
-| `tau_2d_10` | 1.0 | 0.5444 |
-| **`tau_2d_15`** | **1.5** | **0.4094** |
-| **`tau_2d_20`** | **2.0** | **0.4090** |
-
-**Winner:** τ=1.5 and τ=2.0 are effectively tied at ~0.409. Both beat the default τ=1.0 significantly. Stronger logit adjustment helps.
-
-#### Sweep D: Masking Strategy
-
-| Experiment | FG | BBox | Masksup | Best Val Loss |
-|------------|:--:|:----:|:-------:|:------------:|
-| `mask_2d_none` | ❌ | ❌ | ❌ | 0.6782 |
-| `mask_2d_fg_only` | ✅ | ❌ | ❌ | 0.4871 |
-| `mask_2d_bbox_only` | ❌ | ✅ | ❌ | 0.7192 |
-| `mask_2d_bbox_fg` | ✅ | ✅ | ❌ | 0.5467 |
-| `mask_2d_bbox_loose` | ✅ | ✅ | ❌ | 0.3921 |
-| `mask_2d_masksup03` | ✅ | ✅ | ✅ | 0.5515 |
-| **`mask_2d_masksup03_no_bbox`** | ✅ | ❌ | ✅ | **0.3836** |
-
-**Key findings:**
-- Foreground masking alone (0.4871) is a huge win over nothing (0.6782)
-- Tight bbox masking alone (0.7192) actually HURTS — worse than no masking
-- **masksup=0.3 without bbox (0.3836) is the overall best**
-- Loose bbox (0.3921) is competitive
-- The default tight bbox+fg config (0.5467) is mediocre — the bbox is too restrictive
-
-#### Sweep E: Training Techniques
-
-| Experiment | Technique | Best Val Loss |
-|------------|-----------|:------------:|
-| `tech_2d_ema` | EMA (0.999) | 0.5603 |
-| `tech_2d_no_weighted_sampler` | Uniform sampling | ⏳ **Relaunched** (Longleaf 32626754) — weights_only crash, now fixed |
-| `tech_2d_focal_tversky_mild` | FocalTversky γ=0.5 | ⏳ **Relaunched** (Longleaf 32626762) — NaN-corrupted, now fixed |
-
-EMA (0.5603) is better than the BST baseline (0.6055).
-
----
-
-## 8. Bugs Fixed (All Committed)
-
-### 8.1 EmptyImage CUDA OOM (early)
-**Problem:** `get_dataloader()` defaulted to moving all data to GPU, causing ~784 EmptyImage tensors to consume all VRAM.
-**Fix:** Pass `device="cpu"` to `get_dataloader()`. Training loop does per-batch `.to("cuda")`.
-
-### 8.2 Host RAM OOM (2D)
-**Problem:** 2D jobs crashed with 128 GB SLURM allocation.
-**Fix:** Increased to 384 GB. 2D jobs plateau at ~265 GB.
-
-### 8.3 Host RAM OOM (3D)
-**Problem:** 3D jobs with 128³ patches create ~41,000 EmptyImage tensors × 8 MB each = 321 GB.
-**Fix:** Increased SLURM `--mem` from 384G to 512G for 3D jobs. (Long-term fix: make EmptyImage lazy.)
-
-### 8.4 AMP Float16 NaN in Focal Tversky — COMPLETE FIX (3 parts)
-
-**Root cause:** `FocalTverskyLoss` and `AsymmetricUnifiedFocalLoss` compute `(1 - tversky)^γ` where γ < 1. Two interacting issues:
-
-1. **Forward:** Under AMP float16, Tversky can slightly exceed 1.0 → `pow()` of negative base → NaN.
-2. **Backward:** The gradient of x^γ is γ·x^(γ-1), which → ∞ as x→0 when γ<1. In float16, this inf poisons all model weights within ~7 epochs.
-3. **Silent corruption:** When all val batches produce NaN, `val_steps=0` → `avg_val_loss=0.0` → saves NaN model as "best".
-
-**Fix (all committed to main):**
-
-| File | Line(s) | Fix |
-|------|---------|-----|
-| `training/losses/focal_tversky.py` | 73-74, 157-158 | `input.float()` before `sigmoid()` — exits AMP autocast to float32 |
-| `training/losses/focal_tversky.py` | 90, 172, 178 | `.clamp(min=1e-6, max=1.0).pow(gamma)` — epsilon lower bound prevents gradient explosion |
-| `training/losses/loss_zoo.py` | 75 | `.float()` on sigmoid |
-| `training/losses/partial_annotation.py` | 81, 267 | `.float()` on sigmoid |
-| `training/losses/boundary_loss.py` | 133-134 | `.float()` on sigmoid |
-| `training/train.py` | ~563 | `if val_steps > 0` guard before saving best model |
-
-### 8.5 NaN-Skip Guards (safety net)
-**Problem:** Even with fixes, if a loss produces NaN/Inf, it poisons model weights.
-**Fix:** `if not torch.isfinite(loss): optimizer.zero_grad(); continue` in training loop, and corresponding check in validation.
-
-### 8.6 torch.load weights_only=True (PyTorch 2.6 compat)
-**Problem:** `tech_2d_no_weighted_sampler` crashed on checkpoint resume because `torch.load(..., weights_only=True)` rejected `numpy._core.multiarray.scalar` in the checkpoint (PyTorch 2.6 changed the allowlist). Error: `_pickle.UnpicklingError: Weights only load failed... numpy._core.multiarray.scalar was not an allowed global`.
-**Fix:** Changed `train.py` line 374 from `weights_only=True` to `weights_only=False`. Committed as `0d3ec5f`.
-
-### 8.7 Wrong Sbatch for 3D Relaunches (operator error, resolved)
-**Problem:** First attempt to relaunch 5 NaN-corrupted 3D jobs used `ablation_3d.sbatch` (96G mem, buggy `LOSS_KWARGS="{}"` default) instead of `ablation_3d_h100.sbatch` (512G mem). Jobs either OOM'd or failed with bash argument errors.
-**Fix:** Cancelled bad jobs, resubmitted with correct `ablation_3d_h100.sbatch`. **Never use `ablation_3d.sbatch`.**
-
----
-
-## 9. Current Job Status (2026-02-23 ~22:00 EST)
-
-### 9.1 Longleaf L40S — 2D Relaunches (4 jobs, all PENDING)
-
-All submitted via `ssh longleaf.unc.edu`, using `ablation_2d_l40s.sbatch`. Corrupted output dirs were cleaned before resubmission.
-
-| Longleaf Job ID | Experiment | Loss | Extra Args | Issue Fixed |
-|-----------------|-----------|------|------------|-------------|
-| **32626754** | `tech_2d_no_weighted_sampler` | balanced_softmax_tversky | `--no_weighted_sampler` | `weights_only=True` crash (§8.6) |
-| **32626762** | `tech_2d_focal_tversky_mild` | focal_tversky_g05 | — | NaN float16 corruption (§8.4) |
-| **32626772** | `loss_2d_focal_tversky` | focal_tversky | — | NaN float16 corruption (§8.4) |
-| **32626774** | `loss_2d_unified_focal` | unified_focal | — | NaN float16 corruption (§8.4) |
-
-**Expected runtime:** ~3 hours each on L40S. Should complete by **Feb 24 morning**.
-
-**To check status:**
 ```bash
-ssh longleaf.unc.edu "squeue -u gsgeorge --format='%.10i %.45j %.8T %.10M'"
+# Longleaf
+ssh longleaf.unc.edu 'squeue -u gsgeorge --format="%.10i %.20j %.10P %.8T %.12M %.6D %R"'
+# Sycamore
+ssh sycamore 'squeue -u gsgeorge --format="%.10i %.20j %.10P %.8T %.12M %.6D %R"'
+# Completed job history
+ssh longleaf.unc.edu 'sacct -u gsgeorge --starttime=2026-02-23 --format=JobID,JobName%30,State,ExitCode,Elapsed'
 ```
 
-### 9.2 Sycamore H100 — 3D Jobs (33 total: 11 running, 22 pending)
+### Read Results
 
-#### Currently RUNNING (11 jobs, as of ~22:00 EST)
-
-| Sycamore Job ID | Experiment | Runtime | Node |
-|-----------------|-----------|---------|------|
-| 1793588 | `loss_3d_bce` | ~10h | g15070408 |
-| 1793589 | `loss_3d_focal` | ~10h | g15070408 |
-| 1793592 | `loss_3d_balanced_softmax_tversky` | ~10h | g15070404 |
-| 1794171 | `tversky_3d_precision_07_03` | ~7.5h | g15070304 |
-| 1794172 | `tversky_3d_recall` | ~7.5h | g15070304 |
-| 1794173 | `tversky_3d_a08_b04` | ~7.5h | g15070306 |
-| 1794174 | `tversky_3d_a08_b06` | ~7.5h | g15070306 |
-| 1794198 | `mask_3d_bbox_only` | ~2h | g15070404 |
-| 1794199 | `mask_3d_bbox_fg` | ~2h | g15070406 |
-| 1794200 | `mask_3d_bbox_loose` | ~2h | g15070406 |
-| 1794201 | `mask_3d_masksup03` | ~2h | g15070308 |
-
-Also likely running: `mask_3d_masksup03_no_bbox` (1794202) on g15070308.
-
-#### PENDING — Original Batch (13 jobs, never started yet)
-
-| Sycamore Job ID | Experiment |
-|-----------------|-----------|
-| 1794175 | `tau_3d_0` |
-| 1794176 | `tau_3d_05` |
-| 1794177 | `tau_3d_10` |
-| 1794178 | `tau_3d_15` |
-| 1794179 | `tau_3d_20` |
-| 1794180 | `mask_3d_none` |
-| 1794181 | `mask_3d_fg_only` |
-| 1794203 | `tech_3d_ema` |
-| 1794204 | `tech_3d_no_weighted_sampler` |
-| 1794205 | `tech_3d_deep_supervision` |
-| 1794206 | `loss_3d_focal_tversky` |
-| 1794207 | `loss_3d_unified_focal` |
-| 1794208 | `tech_3d_focal_tversky_mild` |
-
-#### PENDING — Relaunched After NaN Corruption (5 jobs)
-
-These 5 3D jobs originally appeared to train but had NaN-corrupted model weights. Corrupted outputs were cleaned, and they were resubmitted with the `.float()` fix applied to all loss files.
-
-| Sycamore Job ID | Experiment | Original Issue |
-|-----------------|-----------|----------------|
-| 1795656 | `loss_3d_dice_bce` | NaN-corrupted (all val batches NaN from ~epoch 7) |
-| 1795657 | `loss_3d_tversky` | NaN-corrupted |
-| 1795658 | `loss_3d_boundary_tversky` | NaN-corrupted |
-| 1795659 | `tversky_3d_balanced` | NaN-corrupted |
-| 1795660 | `tversky_3d_precision_06_04` | NaN-corrupted |
-
-**⚠️ These 5 used non-focal losses** (dice_bce, tversky, boundary_tversky, etc.) but still had NaN corruption. The `.float()` fix was applied broadly to all sigmoid calls in all loss files, which should help. **Monitor these carefully** — if they NaN again, there may be a separate issue in these losses.
-
-### 9.3 Timeline Estimate
-
-- **2D relaunches (4 on L40S):** ~3h each → complete by **Feb 24 morning**
-- **3D jobs (33 on H100):** ~8-15h each, 12 GPU slot limit, ~4-5 waves → complete by **~Feb 26 (Wednesday)**
-
----
-
-## 10. Known Issues & TODOs
-
-### 10.1 ~~Focal Tversky NaN~~ ✅ RESOLVED
-See §8.4. Fix committed, all affected jobs relaunched.
-
-### 10.2 ~~weights_only=True crash~~ ✅ RESOLVED
-See §8.6. Changed to `weights_only=False`. Committed as `0d3ec5f`.
-
-### 10.3 EmptyImage Memory Optimization (deferred)
-The current approach pre-allocates full-size tensors for ~41K EmptyImage objects. A proper fix would monkey-patch `EmptyImage.__init__` to store only the scalar value and shape, expanding to full tensor only in `__getitem__`. This would reduce 3D memory from 321 GB to near zero.
-
-### 10.4 Verify Relaunched 3D Jobs (1795656–1795660)
-These 5 jobs used non-focal losses but still had NaN corruption. The `.float()` fix was applied broadly, but the root cause for these specific jobs may differ. **Action: Once they start running, check early training logs for NaN warnings or val_loss=0.0000.**
-
-### 10.5 Audit 3D Jobs Once Complete
-When 3D jobs finish, run the same audit as 2D: check for NaN-corrupted best.pth, 0.0000 val_loss, zero-batch validation epochs. Use `check_2d_results.py` as a template (adapt for 3D paths).
-
----
-
-## 11. Next Steps
-
-### 11.1 Immediate (next agent session)
-
-1. **Check 2D relaunch status** — confirm L40S jobs (32626754, 32626762, 32626772, 32626774) completed with valid val_loss
-   ```bash
-   ssh longleaf.unc.edu "squeue -u gsgeorge"
-   ```
-2. **Check 3D job progress** — which have finished, are any stuck?
-   ```bash
-   squeue -u gsgeorge --format="%.10i %.45j %.8T %.10M"
-   ```
-3. **Audit completed 3D results** — check for NaN corruption, same as 2D audit
-4. **Fill in missing 2D results** (focal_tversky, unified_focal, no_weighted_sampler, focal_tversky_mild) once relaunches complete
-5. **Update this file** with 3D results as they come in
-
-### 11.2 Phase 2: Architecture Comparison
-
-Once the winning loss/masking/technique combination is determined from Phase 1:
-
-1. Run **4 architectures × 2D**: resnet_2d, unet_2d, swin_2d, vit_2d
-2. Run **4 architectures × 3D**: segresnet_3d, swinunetr_3d, unet_3d, resnet_3d
-3. 100 epochs, 1000 iters/epoch (longer training)
-4. All use the Phase 1 winning configuration
-
-Config generators already exist: `make_arch_comparison_2d()` and `make_arch_comparison_3d()` in `experiments.py`.
-
-### 11.3 Phase 3: Final Submission
-
-1. Train winning architecture + loss with full resources (longer, more data)
-2. Generate predictions on test set
-3. Submit to CellMap leaderboard
-
-### 11.4 Future Improvements (Deferred)
-
-- **Rare-class oversampling**: Beyond weighted_sampler, explicit mining of rare classes
-- **Test-time augmentation (TTA)**: Flip/rotate ensemble for final predictions
-- **Model ensembling**: Combine 2D + 3D predictions
-- **Sliding window inference**: For full-volume prediction at test time
-
----
-
-## 12. Quick Reference: How to Run
-
-### Launch 2D experiments (on Longleaf L40S)
 ```bash
-# Single experiment (from Sycamore, via SSH to Longleaf)
-ssh longleaf.unc.edu "cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=loss_2d_bce MODEL_NAME=resnet_2d LOSS_NAME=bce \
-  sbatch --job-name=abl_loss_2d_bce training/slurm/ablation_2d_l40s.sbatch"
-```
+# Last lines of job output (includes "Best val loss: X.XXXX")
+ssh longleaf.unc.edu 'tail -5 /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/runs/ablation/logs/<jobname>_<jobid>.out'
 
-### Launch 3D experiments (on Sycamore H100)
-```bash
-# Single experiment (run directly on sycamore-login1)
-EXPERIMENT_NAME=loss_3d_bce MODEL_NAME=segresnet_3d LOSS_NAME=bce \
-  sbatch --job-name=abl_loss_3d_bce training/slurm/ablation_3d_h100.sbatch
-```
-
-### Monitor jobs
-```bash
-# Sycamore H100 (3D)
-squeue -u gsgeorge --format="%.10i %.45j %.8T %.10M"
-
-# Longleaf L40S (2D)
-ssh longleaf.unc.edu "squeue -u gsgeorge --format='%.10i %.45j %.8T %.10M'"
-
-# Live training output
-tail -f runs/ablation/logs/abl_*_*.out
-
-# All val losses
-grep "Val loss:" runs/ablation/logs/abl_*_*.out | sort
-```
-
-### Check results
-```bash
-# Best val loss per experiment
-for dir in runs/ablation/*/; do
-    name=$(basename "$dir")
-    [[ "$name" == "logs" ]] && continue
-    logfile=$(ls runs/ablation/logs/abl_${name}_*.out 2>/dev/null | tail -1)
-    if [ -n "$logfile" ]; then
-        best=$(grep "New best model" "$logfile" | tail -1 | grep -oP 'val_loss=\K[0-9.]+')
-        echo "$name: $best"
-    fi
+# Grep best val loss from all log files
+for f in runs/ablation/logs/*.out; do
+  name=$(basename "$f" | sed 's/_[0-9]*.out//');
+  best=$(grep -o "Best val loss: [0-9.]*" "$f" | tail -1 | awk '{print $NF}');
+  echo "$name: $best";
 done | sort -t: -k2 -n
+
+# TensorBoard
+tensorboard --logdir runs/ablation/<experiment_name>/tensorboard
 ```
 
-### TensorBoard
+### Run Per-Class Evaluation
+
 ```bash
-tensorboard --logdir runs/ablation/ --port 6006
+# Single experiment
+python -m training.eval_2d_perclass \
+  --experiment <experiment_name> \
+  --run_dir runs/ablation \
+  --output_dir runs/ablation
+
+# Results written to runs/ablation/eval_2d_perclass.json and .csv
 ```
 
 ---
 
-## 13. Git Log (Recent Fixes)
+## Next Steps (for continuing agent)
 
-```
-0d3ec5f fix: change weights_only=True to False for PyTorch 2.6 compat
-         (training/train.py line 374)
+1. **Check validation results** — when jobs 33019765, 33019782, 33019784 complete:
+   - Read results: `tail -20 runs/ablation/logs/val_*_<jobid>.out`
+   - Compare val_loss to baseline 0.112 (`tech_2d_dicebce_ema`)
+   - If improvement: include in Phase 2 config's `EXTRA_ARGS`
+   - If worse: exclude from Phase 2 config
 
-[prior]  fix: float32 cast + epsilon clamp for focal tversky NaN
-         (focal_tversky.py, loss_zoo.py, partial_annotation.py, boundary_loss.py)
+2. **Check remaining 3D results** — when jobs 1820946, 1820947, 1820948 complete:
+   - These complete the 3D masking/weighting ablation picture
+   - Key question: does fg_mask help in 3D? (It helped modestly in 2D)
 
-[prior]  fix: val_steps > 0 guard before saving best model
-         (training/train.py)
-```
+3. **Update Phase 2 defaults** — in `training/configs/experiments.py`:
+   - Change `make_arch_comparison_2d()` default loss from `"balanced_softmax_tversky"` to `"dice_bce"`
+   - Change `make_arch_comparison_3d()` default loss similarly
+   - Add `ema=True, ema_decay=0.999` to both functions
+   - Add `use_foreground_mask=True` to both functions
+   - Optionally add `intensity_aug` and `class_aware_sampling` based on validation results
+   - Update `training/slurm/launch_arch_comparison.sh` `BEST_LOSS` variable
 
----
+4. **Launch Phase 2** — 8 architecture comparison experiments:
+   - 4 × 2D on Longleaf L40S (resnet_2d, unet_2d, swin_2d, vit_2d)
+   - 4 × 3D on Sycamore H100 `h100_sn` (segresnet_3d, swinunetr_3d, unet_3d, resnet_3d)
+   - Use 100 epochs, 1000 iters/epoch (2D) or 500 iters/epoch (3D)
 
-## 14. Presentation
+5. **Run per-class evaluation** on Phase 2 results to determine final model selection
 
-A comprehensive LaTeX-figure presentation was created summarizing Phase 1 2D results:
+6. **Consider 3D EMA re-validation** — EMA was only validated with dice_bce in 2D. The 3D EMA result (0.691) used BST. Consider running `dice_bce + EMA` in 3D before Phase 2 3D launches, or just include EMA by default given the massive 2D improvement.
 
-- **File:** `make_presentation.py` → generates `presentation.pptx` (~1.9 MB)
-- **Template:** `GStephenson_Rotation3_Slides.pptx` (UNC lab template, gold/dark theme)
-- **Figures:** 11 TikZ `.tex` files in `figures/` → compiled to PNG at 300 DPI
-- **Build:** `bash figures/build_figures.sh` (requires `/usr/bin/pdflatex`, NOT conda's broken pdflatex)
-- **Local texmf:** `~/texmf/` has manually installed packages: standalone, pgfplots, tcolorbox, environ, ydoc
-- **Slides:** Project overview, pipeline diagram, loss formulas, all 5 sweep results, NaN bug timeline, next steps
+7. **Consider deep supervision for 3D** — `tech_3d_deep_supervision` (val_loss=0.556) was much better than the BST baseline (0.695). With dice_bce + EMA, deep supervision may stack further improvements for SegResNet. Add `--deep_supervision` to SegResNet 3D Phase 2 run.
