@@ -215,3 +215,8 @@ archive/experiments/model_comparison/tensorboard/
 archive/experiments/l40s_comparison/visualizations/
 archive/experiments/l40s_comparison/slurm/
 *.nii.gz
+
+# Presentation files
+make_presentation.py
+presentation.pptx
+GStephenson_Rotation3_Slides.pptx

@@ -275,6 +275,30 @@ TECHNIQUE_SWEEP_2D = [
 ]
 
 # ============================================================================
+# PHASE 1E-bis: Re-validate sweep E techniques with dice_bce base loss
+# The original sweep E used BST — need to confirm EMA / sampler effects
+# transfer to the winning loss (dice_bce) before Phase 2.
+# Baseline = loss_2d_dice_bce from sweep A (already ran).
+# ============================================================================
+
+TECHNIQUE_DICEBCE_SWEEP_2D = [
+    # EMA with dice_bce — does EMA help the winning loss?
+    ExperimentConfig(
+        experiment_name="tech_2d_dicebce_ema",
+        model="resnet_2d", loss="dice_bce",
+        use_foreground_mask=True,
+        ema=True, ema_decay=0.999,
+    ),
+    # No weighted sampler with dice_bce — confirm sampler is still critical
+    ExperimentConfig(
+        experiment_name="tech_2d_dicebce_no_sampler",
+        model="resnet_2d", loss="dice_bce",
+        use_foreground_mask=True,
+        weighted_sampler=False,
+    ),
+]
+
+# ============================================================================
 # PHASE 1 (3D versions): Same sweeps on SegResNet 3D
 # ============================================================================
 
