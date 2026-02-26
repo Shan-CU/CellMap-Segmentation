@@ -1,6 +1,6 @@
-# CellMap Segmentation — Experiment Progress & Handoff Document
+WH# CellMap Segmentation — Experiment Progress & Handoff Document
 
-> **Last updated:** February 25, 2026  
+> **Last updated:** February 26, 2026  
 > **Author:** AI Agent (GitHub Copilot, Claude Opus 4.6)  
 > **Purpose:** Full context for any agent continuing this work
 
@@ -147,16 +147,16 @@ Key flags beyond standard hyperparameters:
 
 ### Sweep A: Loss Function (2D, ResNet)
 
-| Experiment | Loss | Val Loss | Mean Dice | Rank |
-|------------|------|----------|-----------|------|
-| `loss_2d_bce` | BCE | **0.0425** | **0.479** | 🥇 |
-| `loss_2d_dice_bce` | Dice+BCE | 0.4656 | 0.462 | 🥈 |
-| `loss_2d_boundary_tversky` | Boundary Tversky | 0.6996 | 0.410 | 3 |
-| `loss_2d_tversky` | Tversky | 0.7136 | 0.393 | 4 |
-| `loss_2d_focal_tversky` | Focal Tversky | 0.5472 | 0.378 | 5 |
-| `loss_2d_unified_focal` | Unified Focal | 0.5473 | 0.372 | 6 |
-| `loss_2d_focal` | Focal | 0.5472 | 0.362 | 7 |
-| `loss_2d_balanced_softmax_tversky` | BST (τ=1.0) | 0.6055 | 0.240 | 8 |
+| Experiment | Loss | Val Loss | Mean Dice (14-class) | Rank |
+|------------|------|----------|---------------------|------|
+| `loss_2d_bce` | BCE | **0.0425** | **0.4755** | 🥇 |
+| `loss_2d_dice_bce` | Dice+BCE | 0.4656 | 0.4593 | 🥈 |
+| `loss_2d_boundary_tversky` | Boundary Tversky | 0.6996 | 0.4069 | 3 |
+| `loss_2d_tversky` | Tversky | 0.7136 | 0.3983 | 4 |
+| `loss_2d_focal_tversky` | Focal Tversky | 0.5472 | 0.3777 | 5 |
+| `loss_2d_unified_focal` | Unified Focal | 0.5473 | 0.3714 | 6 |
+| `loss_2d_focal` | Focal | 0.5472 | 0.3615 | 7 |
+| `loss_2d_balanced_softmax_tversky` | BST (τ=1.0) | 0.6055 | 0.2385 | 8 |
 
 **Finding:** Simple losses (BCE, Dice+BCE) massively outperform complex losses. BST's τ=1.0 logit adjustment over-corrects with 48 classes, producing too many false positives on rare classes.
 
@@ -164,112 +164,137 @@ Key flags beyond standard hyperparameters:
 
 ### Sweep B: Tversky α/β (2D, ResNet)
 
-| Experiment | α | β | Mean Dice |
-|------------|---|---|-----------|
-| `tversky_2d_balanced` | 0.5 | 0.5 | 0.408 |
-| `tversky_2d_a08_b06` | 0.8 | 0.6 | 0.409 |
-| `tversky_2d_recall` | 0.3 | 0.7 | 0.409 |
-| `tversky_2d_precision_07_03` | 0.7 | 0.3 | 0.386 |
-| `tversky_2d_a08_b04` | 0.8 | 0.4 | 0.371 |
-| `tversky_2d_precision_06_04` | 0.6 | 0.4 | 0.374 |
+| Experiment | α | β | Mean Dice (14-class) |
+|------------|---|---|---------------------|
+| `tversky_2d_balanced` | 0.5 | 0.5 | 0.4078 |
+| `tversky_2d_recall` | 0.3 | 0.7 | 0.4074 |
+| `tversky_2d_a08_b06` | 0.8 | 0.6 | 0.4066 |
+| `tversky_2d_precision_07_03` | 0.7 | 0.3 | 0.3820 |
+| `tversky_2d_a08_b04` | 0.8 | 0.4 | 0.3721 |
+| `tversky_2d_precision_06_04` | 0.6 | 0.4 | 0.3719 |
 
 **Finding:** All Tversky variants clustered around 0.37–0.41 mean Dice. No α/β combination came close to BCE (0.479) or dice_bce (0.462). Tversky-based losses are suboptimal for this task.
 
 ### Sweep C: Class Weighting τ (2D, ResNet, BST)
 
-| Experiment | τ | Val Loss | Mean Dice |
-|------------|---|----------|-----------|
-| `tau_2d_20` | 2.0 | 0.4090 | 0.000 |
-| `tau_2d_15` | 1.5 | 0.4094 | 0.000 |
-| `tau_2d_10` | 1.0 | 0.5444 | 0.133 |
-| `tau_2d_05` | 0.5 | 0.4252 | 0.408 |
-| `tau_2d_0` | 0.0 | 0.4252 | 0.323 |
+| Experiment | τ | Val Loss | Mean Dice (14-class) |
+|------------|---|----------|---------------------|
+| `tau_2d_05` | 0.5 | 0.4252 | 0.4092 |
+| `tau_2d_0` | 0.0 | 0.4252 | 0.3246 |
+| `tau_2d_10` | 1.0 | 0.5444 | 0.1318 |
+| `tau_2d_15` | 1.5 | 0.4094 | 0.0000 |
+| `tau_2d_20` | 2.0 | 0.4090 | 0.0000 |
 
 **Finding:** High τ completely destroys predictions (mean Dice = 0). τ=0.5 is best within BST family but still worse than dice_bce. Logit adjustment doesn't work well with partial annotations at 48 classes.
 
 ### Sweep D: Masking Strategy (2D, ResNet, BST)
 
-| Experiment | Strategy | Mean Dice |
-|------------|----------|-----------|
-| `mask_2d_masksup03_no_bbox` | MaskSup λ=0.3, no bbox | 0.263 |
-| `mask_2d_fg_only` | FG mask only | 0.254 |
-| `mask_2d_none` | No masking | 0.250 |
-| `mask_2d_bbox_loose` | Loose bbox + FG | 0.240 |
-| `mask_2d_masksup03` | MaskSup λ=0.3 + bbox | 0.136 |
-| `mask_2d_bbox_only` | Bbox only | 0.134 |
-| `mask_2d_bbox_fg` | Bbox + FG | 0.133 |
+⚠️ All mask experiments used BST base loss. Results are confounded — rankings reflect
+masking interaction with BST, not masking quality in general. Since Phase 2 uses dice_bce,
+these are **not directly actionable**. FG mask was the default for all top-performing
+loss sweep experiments.
 
-**Finding:** FG masking provides modest improvement. Bbox masking hurts when combined with BST (bbox over-constrains already over-adjusted logits). Best strategy is simple FG mask.
+| Experiment | Strategy | Mean Dice (14-class) |
+|------------|----------|---------------------|
+| `mask_2d_masksup03_no_bbox` | MaskSup λ=0.3, no bbox | 0.2618 |
+| `mask_2d_fg_only` | FG mask only | 0.2547 |
+| `mask_2d_none` | No masking | 0.2511 |
+| `mask_2d_bbox_loose` | Loose bbox + FG | 0.2366 |
+| `mask_2d_masksup03` | MaskSup λ=0.3 + bbox | 0.1372 |
+| `mask_2d_bbox_only` | Bbox only | 0.1348 |
+| `mask_2d_bbox_fg` | Bbox + FG | 0.1314 |
 
 ### Sweep E: Training Techniques (2D, ResNet)
 
-**Original (with BST base loss):**
+**BST-based (not actionable — confounded by BST):**
 
-| Experiment | Technique | Val Loss | Mean Dice |
-|------------|-----------|----------|-----------|
-| `tech_2d_ema` | EMA (decay=0.999) | 0.5603 | 0.102 |
-| `tech_2d_no_weighted_sampler` | No sampler | 0.5645 | 0.082 |
-| `tech_2d_focal_tversky_mild` | Focal γ=0.5 | 0.5709 | 0.325 |
+| Experiment | Technique | Val Loss | Mean Dice (14-class) |
+|------------|-----------|----------|---------------------|
+| `tech_2d_focal_tversky_mild` | Focal γ=0.5 | 0.5709 | 0.3245 |
+| `tech_2d_ema` | EMA (decay=0.999) | 0.5603 | 0.1008 |
+| `tech_2d_no_weighted_sampler` | No sampler | 0.5645 | 0.0823 |
 
-**Re-validated with dice_bce (winning loss):**
+**dice_bce-based (Phase 2 relevant) ⭐:**
 
-| Experiment | Config | Val Loss | Notes |
-|------------|--------|----------|-------|
-| `tech_2d_dicebce_ema` | dice_bce + EMA + fg_mask + sampler | **0.112** | ⭐ **4× improvement over no-EMA (0.466)** |
-| `tech_2d_dicebce_no_sampler` | dice_bce + EMA + fg_mask, no sampler | **0.122** | Sampler helps ~9% |
+| Experiment | Config | Val Loss | Mean Dice (14-class) |
+|------------|--------|----------|---------------------|
+| `tech_2d_dicebce_ema` | dice_bce + EMA + fg_mask + sampler | **0.112** | **0.4598** ⭐ |
+| `tech_2d_dicebce_no_sampler` | dice_bce + EMA + fg_mask, no sampler | 0.122 | 0.2904 |
 
-**Finding:** EMA is the single biggest improvement discovered. It smooths noisy gradients from the imbalanced 48-class partial annotation setup. Val loss dropped from 0.466 → 0.112 (4× better). Weighted sampler provides modest additional benefit (0.112 vs 0.122).
+**Validation experiments (dice_bce + EMA + fg + sampler + extras):**
 
-### 3D Results (SegResNet baseline)
+| Experiment | Extra Feature | Mean Dice (14-class) | vs baseline (0.4598) |
+|------------|--------------|---------------------|---------------------|
+| `val_intensity_aug` | intensity augmentation | 0.3539 | **−23.0% ❌** |
+| `val_crop_weights` | class-aware crop weighting | 0.2849 | **−38.0% ❌** |
+| `val_combined` | both | 0.2133 | **−53.6% ❌** |
 
-| Experiment | Val Loss | Notes |
-|------------|----------|-------|
-| `loss_3d_dice_bce` | **0.170** | 🥇 Best 3D loss |
-| `loss_3d_bce` | 0.220 | Runner-up |
-| `mask_3d_bbox_only` | 0.541 | |
-| `tech_3d_deep_supervision` | 0.556 | Deep supervision helps SegResNet |
-| `tau_3d_20` | 0.597 | Partial result (was still running) |
-| `loss_3d_unified_focal` | 0.667 | |
-| `tech_3d_ema` | 0.691 | EMA with BST (not re-validated with dice_bce) |
-| `loss_3d_balanced_softmax_tversky` | 0.695 | BST fails in 3D too |
-| `mask_3d_bbox_fg` | 0.695 | |
-| `mask_3d_bbox_loose` | 0.695 | |
-| `loss_3d_boundary_tversky` | 0.720 | |
-| `loss_3d_focal` | 0.723 | |
-| `tech_3d_focal_tversky_mild` | 0.722 | |
-| `tversky_3d_a08_b06` | 0.730 | |
-| `tech_3d_no_weighted_sampler` | 0.736 | |
-| `loss_3d_tversky` | 0.740 | |
-| `tversky_3d_precision_06_04` | 0.740 | |
-| `tversky_3d_precision_07_03` | 0.747 | |
-| `mask_3d_masksup03` | 0.749 | |
-| `mask_3d_masksup03_no_bbox` | 0.749 | |
-| `tau_3d_0` | 0.777 | |
-| `tau_3d_05` | 0.777 | |
-| `tversky_3d_balanced` | 0.804 | |
-| `tversky_3d_recall` | 0.814 | |
-| `tversky_3d_a08_b04` | 0.919 | |
-| `mask_3d_fg_only` | PENDING | Job 1820948 still running |
-| `mask_3d_none` | PENDING | Job 1820947 still running |
+**Key findings:**
+1. **EMA is essential**: dice_bce + EMA = 0.4598 vs dice_bce alone = 0.4593 (similar Dice, but 4× better val_loss: 0.112 vs 0.466)
+2. **Weighted sampler is essential**: With = 0.4598; without = 0.2904 (−37%)
+3. **Intensity augmentation HURTS** (−23%) — likely because EM intensity is consistent within volumes
+4. **Class-aware crop weighting HURTS** (−38%) — disrupts the balanced sampling that cellmap-data provides
+5. **Combining both HURTS even more** (−54%)
 
-**Finding:** dice_bce wins in 3D too (0.170 vs next best 0.220). Same pattern as 2D — simple losses outperform complex ones. Deep supervision provides significant benefit for SegResNet (0.556 vs 0.695 for BST).
+**Finding:** EMA smooths noisy gradients from the imbalanced 48-class partial annotation setup. Weighted sampler provides critical class balance. Intensity aug and class-aware crop weighting both interfere with training — **exclude from Phase 2**.
+
+### 3D Results (SegResNet baseline) — Per-class Dice (14-class eval)
+
+⚠️ **CRITICAL FINDING:** 3D ablation results are essentially non-functional. Every experiment
+produced mean Dice ≈ 0.00–0.017. The training regime (50 epochs × 250 iters = 12,500 steps)
+was woefully insufficient for 3D 128³ volumes. We cannot draw reliable hyperparameter conclusions
+from 3D ablation — we must transfer 2D findings to 3D.
+
+| Rank | Experiment | Mean Dice | Best Class |
+|------|-----------|-----------|------------|
+| 1 | `mask_3d_masksup03` | 0.0169 | nuc=0.236 |
+| 2 | `mask_3d_fg_only` | 0.0168 | nuc=0.234 |
+| 3 | `loss_3d_bce` | 0.0166 | nuc=0.175 |
+| 4 | `mask_3d_masksup03_no_bbox` | 0.0166 | nuc=0.230 |
+| 5 | `tech_3d_deep_supervision` | 0.0164 | nuc=0.230 |
+| 6 | `tau_3d_15` | 0.0149 | nuc=0.112 |
+| 7 | `tech_3d_no_weighted_sampler` | 0.0104 | mito_mem=0.098 |
+| 8 | `tversky_3d_recall` | 0.0076 | nuc=0.106 |
+| 9 | `tau_3d_05` | 0.0045 | mito_mem=0.043 |
+| 10 | `mask_3d_bbox_loose` | 0.0037 | nuc=0.049 |
+| 11–29 | (everything else) | ≤0.002 | mostly 0.000 |
+
+**Key observations:**
+- **`loss_3d_dice_bce` = 0.000 Dice** despite being #1 by val_loss (0.170). Val_loss was misleading!
+- Only `nuc` (the largest organelle) gets any signal at all (max 0.236 Dice)
+- `loss_3d_bce` = 0.017 — only loss that produced non-zero Dice in the loss sweep
+- 3D needs **much more training** in Phase 2 (100 epochs × 500 iters = 50,000 steps, 4× more)
+
+**Val_loss rankings (from training logs) — for reference only:**
+
+| Experiment | Val Loss | Dice Eval |
+|------------|----------|-----------|
+| `loss_3d_dice_bce` | **0.170** | 0.000 ⚠️ |
+| `loss_3d_bce` | 0.220 | 0.017 |
+| `mask_3d_bbox_only` | 0.541 | 0.000 |
+| `tech_3d_deep_supervision` | 0.556 | 0.016 |
+| Everything else | 0.59–0.92 | ≤0.015 |
 
 ---
 
 ## 5. Key Findings & Decisions
 
-### Optimal Phase 2 Configuration
+### Optimal Phase 2 Configuration ✅ FINALIZED
 
 ```
-Loss:             dice_bce (bce_weight=0.5, smooth=1e-6)
-EMA:              enabled, decay=0.999
-FG Mask:          enabled
-Weighted Sampler: enabled (cellmap-data default)
-Intensity Aug:    TBD (waiting on val_intensity_aug results)
-Class-Aware:      TBD (waiting on val_crop_weights results)
-AMP:              enabled
-Scheduler:        cosine with 5-epoch warmup
-Optimizer:        RAdam, lr=1e-4
+Loss:              dice_bce (bce_weight=0.5, smooth=1e-6)
+EMA:               enabled, decay=0.999
+FG Mask:           enabled
+Weighted Sampler:  enabled (cellmap-data default)
+Intensity Aug:     DISABLED (hurt −23% in validation)
+Class-Aware Crop:  DISABLED (hurt −38% in validation)
+Deep Supervision:  ENABLED for SegResNet only
+AMP:               enabled
+Scheduler:         cosine with 5-epoch warmup
+Optimizer:         RAdam, lr=1e-4
+Epochs:            100 (2× ablation)
+Iters/epoch:       1000 (2D) / 500 (3D)
+Val every:         5 epochs
 ```
 
 ### Why dice_bce Over BCE
@@ -304,31 +329,27 @@ These validate features cherry-picked from the OrganelleSeg repo (coworker Greg'
 
 **Baseline:** `tech_2d_dicebce_ema` → val_loss = 0.112
 
-**Intensity augmentation** (`--intensity_aug`):
-- RandomBrightness ±0.1, RandomContrast 0.8–1.2, RandomGaussianNoise σ=0.01–0.05
-- Applied to raw EM inputs via `train_raw_value_transforms` (train only, not val)
-- Rationale: EM data has natural intensity variation across sections; augmentation should improve generalization
+### Validation Results — ❌ All HURT Performance
 
-**Class-aware crop weighting** (`--class_aware_sampling`):
-- Replaces default weighted sampler with inverse-sqrt class-aware weighting
-- `weight(crop) = 0.7 × mean(1/√(global_count(c))) + 0.3 × uniform`
-- Rationale: upweight crops containing rare organelles (NE, peroxisomes, MT-inner)
+| Experiment | Extra Feature | Val Loss | Mean Dice (14-class) | Verdict |
+|------------|--------------|----------|---------------------|---------|
+| `val_intensity_aug` | intensity augmentation | 0.1349 | 0.3539 | ❌ −23% |
+| `val_crop_weights` | class-aware crop weighting | 0.1228 | 0.2849 | ❌ −38% |
+| `val_combined` | both | 0.1350 | 0.2133 | ❌ −54% |
 
-### Remaining 3D Ablations (Sycamore H100)
+**Conclusion:** Neither feature helps. Both are excluded from Phase 2.
 
-| Job ID | Name | Status | Expected Finish |
-|--------|------|--------|-----------------|
-| 1820946 | `tau_3d_20` | RUNNING (~9h in) | ~3-6h from now |
-| 1820947 | `mask_3d_none` | RUNNING (~9h in) | ~3-6h from now |
-| 1820948 | `mask_3d_fg_only` | RUNNING (~9h in) | ~3-6h from now |
+### All 3D Ablations — ✅ Complete
+
+All 29 3D experiments are complete. See Section 4 for full Dice eval results.
+3D results were essentially non-functional (max Dice = 0.017) due to insufficient training
+(50 epochs × 250 iters = 12,500 steps for 128³ volumes).
 
 ---
 
 ## 7. Phase 2 Plan — Architecture Comparison
 
-### Configuration
-
-Once validation experiments complete, finalize the Phase 2 base config:
+### Configuration ✅ FINALIZED
 
 ```python
 # In training/configs/experiments.py
@@ -337,10 +358,10 @@ use_foreground_mask = True
 ema = True
 ema_decay = 0.999
 epochs = 100              # 2× ablation
-iterations_per_epoch = 1000  # 2× ablation
+iterations_per_epoch = 1000  # 2D (500 for 3D)
 val_every_n_epochs = 5
-intensity_aug = TBD       # Include if val_intensity_aug ≤ 0.112
-class_aware_sampling = TBD  # Include if val_crop_weights ≤ 0.112
+intensity_aug = False      # DISABLED — hurt −23%
+class_aware_sampling = False  # DISABLED — hurt −38%
 ```
 
 ### ⚠️ IMPORTANT: Update Phase 2 Defaults Before Launching
@@ -441,7 +462,11 @@ As of commit `e5d9f92` (Feb 25, 2026):
 | `runs/ablation/<exp>/checkpoints/best.pth` | Best model weights (EMA if enabled) |
 | `runs/ablation/<exp>/tensorboard/` | Training curves |
 | `runs/ablation/logs/<jobname>_<jobid>.out` | SLURM stdout with val_loss history |
-| `runs/ablation/eval_2d_perclass.json` | Per-class metrics (2D Phase 1 only) |
+| `runs/ablation/eval_2d_perclass.json` | Per-class metrics (original 2D eval, 29 experiments) |
+| `runs/ablation/eval_14class_2d.json` | Per-class 14-class Dice (all 34 2D experiments) |
+| `runs/ablation/eval_14class_3d.json` | Per-class 14-class Dice (all 29 3D experiments) |
+| `runs/ablation/eval_all_perclass_2d.csv` | 2D leaderboard CSV |
+| `runs/ablation/eval_all_perclass_3d.csv` | 3D leaderboard CSV |
 
 ---
 
@@ -510,31 +535,20 @@ python -m training.eval_2d_perclass \
 
 ## Next Steps (for continuing agent)
 
-1. **Check validation results** — when jobs 33019765, 33019782, 33019784 complete:
-   - Read results: `tail -20 runs/ablation/logs/val_*_<jobid>.out`
-   - Compare val_loss to baseline 0.112 (`tech_2d_dicebce_ema`)
-   - If improvement: include in Phase 2 config's `EXTRA_ARGS`
-   - If worse: exclude from Phase 2 config
-
-2. **Check remaining 3D results** — when jobs 1820946, 1820947, 1820948 complete:
-   - These complete the 3D masking/weighting ablation picture
-   - Key question: does fg_mask help in 3D? (It helped modestly in 2D)
-
+1. ~~Check validation results~~ ✅ Done — intensity_aug (−23%), crop_weights (−38%), combined (−54%). All hurt. Excluded.
+2. ~~Check remaining 3D results~~ ✅ Done — All 29 3D experiments complete. 3D ablation was non-functional (max Dice 0.017).
 3. **Update Phase 2 defaults** — in `training/configs/experiments.py`:
-   - Change `make_arch_comparison_2d()` default loss from `"balanced_softmax_tversky"` to `"dice_bce"`
-   - Change `make_arch_comparison_3d()` default loss similarly
-   - Add `ema=True, ema_decay=0.999` to both functions
-   - Add `use_foreground_mask=True` to both functions
-   - Optionally add `intensity_aug` and `class_aware_sampling` based on validation results
+   - Change `make_arch_comparison_2d()` and `make_arch_comparison_3d()` defaults:
+     - `loss="dice_bce"` (not `"balanced_softmax_tversky"`)
+     - `ema=True, ema_decay=0.999`
+     - `use_foreground_mask=True`
+     - `intensity_aug=False, class_aware_sampling=False`
    - Update `training/slurm/launch_arch_comparison.sh` `BEST_LOSS` variable
-
 4. **Launch Phase 2** — 8 architecture comparison experiments:
    - 4 × 2D on Longleaf L40S (resnet_2d, unet_2d, swin_2d, vit_2d)
    - 4 × 3D on Sycamore H100 `h100_sn` (segresnet_3d, swinunetr_3d, unet_3d, resnet_3d)
-   - Use 100 epochs, 1000 iters/epoch (2D) or 500 iters/epoch (3D)
-
+   - SegResNet gets `--deep_supervision` too
+   - All train on **48-class datasplit.csv** (the fixed version)
+   - 100 epochs, 1000 iters/epoch (2D) / 500 iters/epoch (3D)
 5. **Run per-class evaluation** on Phase 2 results to determine final model selection
-
-6. **Consider 3D EMA re-validation** — EMA was only validated with dice_bce in 2D. The 3D EMA result (0.691) used BST. Consider running `dice_bce + EMA` in 3D before Phase 2 3D launches, or just include EMA by default given the massive 2D improvement.
-
-7. **Consider deep supervision for 3D** — `tech_3d_deep_supervision` (val_loss=0.556) was much better than the BST baseline (0.695). With dice_bce + EMA, deep supervision may stack further improvements for SegResNet. Add `--deep_supervision` to SegResNet 3D Phase 2 run.
+6. **Final submission preparation** — ensemble, post-processing, test set inference
