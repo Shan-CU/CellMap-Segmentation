@@ -114,6 +114,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no_weighted_sampler", action="store_true", default=False,
                         help="Disable weighted crop sampler (use uniform)")
 
+    # Data augmentation / sampling improvements
+    parser.add_argument("--intensity_aug", action="store_true", default=False,
+                        help="Enable intensity augmentation (brightness, contrast, noise)")
+    parser.add_argument("--class_aware_sampling", action="store_true", default=False,
+                        help="Use inverse-sqrt class-aware crop weighting sampler")
+
     # OHEM
     parser.add_argument("--ohem_ratio", type=float, default=0.0,
                         help="Online hard example mining: keep top-K%% hardest voxels (0=disabled)")
@@ -274,6 +280,24 @@ def train(args: argparse.Namespace) -> None:
     # Keep data on CPU during loading to avoid CUDA OOM from pre-moving
     # all ~784 dataset EmptyImage tensors to GPU. The training loop already
     # handles per-batch .to(device) for inputs and targets.
+
+    # Intensity augmentation: append to train_raw_value_transforms
+    extra_dl_kwargs = {}
+    if args.intensity_aug:
+        from training.transforms.intensity import IntensityAugmentation
+        intensity_aug = IntensityAugmentation()
+        custom_train_transforms = T.Compose([
+            T.ToDtype(torch.float, scale=True),
+            NaNtoNum({"nan": 0, "posinf": None, "neginf": None}),
+            intensity_aug,
+        ])
+        extra_dl_kwargs["train_raw_value_transforms"] = custom_train_transforms
+        print(f"Intensity augmentation enabled: {intensity_aug}")
+
+    # Class-aware sampling: build custom sampler callable
+    # We need to create it AFTER the dataloader is built (needs access to
+    # the dataset's class_counts). So we first build with default sampler,
+    # then replace it.
     train_loader, val_loader = get_dataloader(
         datasplit_path=args.datasplit_path,
         classes=classes,
@@ -286,7 +310,21 @@ def train(args: argparse.Namespace) -> None:
         device="cpu",
         weighted_sampler=args.weighted_sampler,
         num_workers=args.num_workers,
+        **extra_dl_kwargs,
     )
+
+    # Replace sampler with class-aware version if requested
+    if args.class_aware_sampling:
+        from training.samplers.crop_weights import make_class_aware_sampler
+        sampler_fn = make_class_aware_sampler(
+            dataset=train_loader.dataset,
+            iterations_per_epoch=args.iterations_per_epoch,
+            batch_size=args.batch_size,
+            blend_ratio=0.7,
+        )
+        train_loader.sampler = sampler_fn
+        train_loader.refresh()
+        print("Class-aware crop weighting sampler enabled (blend=0.7)")
     print(f"Train loader: {len(train_loader.loader)} batches/epoch")
     if val_loader is not None:
         print(f"Val loader: {len(val_loader.loader)} batches")

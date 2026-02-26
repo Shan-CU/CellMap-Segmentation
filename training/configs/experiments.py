@@ -65,6 +65,10 @@ class ExperimentConfig:
     # Sampler
     weighted_sampler: bool = True
 
+    # Data loading improvements
+    intensity_aug: bool = False
+    class_aware_sampling: bool = False
+
     def to_cli_args(self, run_dir: str = "runs/ablation") -> str:
         """Convert to CLI argument string for training/train.py."""
         args = [
@@ -102,6 +106,10 @@ class ExperimentConfig:
                 args.append(f"--ds_weights {' '.join(map(str, self.ds_weights))}")
         if not self.weighted_sampler:
             args.append("--no_weighted_sampler")
+        if self.intensity_aug:
+            args.append("--intensity_aug")
+        if self.class_aware_sampling:
+            args.append("--class_aware_sampling")
         return " \\\n    ".join(args)
 
 
@@ -345,6 +353,48 @@ TECHNIQUE_SWEEP_3D = _TECHNIQUE_3D_BASE + [
         learning_rate=1e-4,
         validation_time_limit=180,
         val_every_n_epochs=5,
+    ),
+]
+
+
+# ============================================================================
+# VALIDATION: Data loading improvements (intensity aug + class-aware sampling)
+# Base config: dice_bce + EMA + fg_mask + weighted_sampler (best from Phase 1)
+# These experiments validate cherry-picked features from OrganelleSeg.
+# ============================================================================
+
+_VAL_BASE = dict(
+    model="resnet_2d",
+    loss="dice_bce",
+    use_foreground_mask=True,
+    ema=True,
+    ema_decay=0.999,
+    epochs=50,
+    iterations_per_epoch=500,
+    val_every_n_epochs=5,
+)
+
+VALIDATION_DATA_LOADING = [
+    # Intensity augmentation only (brightness ±0.1, contrast 0.8-1.2, noise σ 0.01-0.05)
+    ExperimentConfig(
+        experiment_name="val_intensity_aug",
+        intensity_aug=True,
+        class_aware_sampling=False,
+        **_VAL_BASE,
+    ),
+    # Class-aware crop weighting only (inverse-sqrt, 70/30 blend)
+    ExperimentConfig(
+        experiment_name="val_crop_weights",
+        intensity_aug=False,
+        class_aware_sampling=True,
+        **_VAL_BASE,
+    ),
+    # Combined: both improvements
+    ExperimentConfig(
+        experiment_name="val_combined",
+        intensity_aug=True,
+        class_aware_sampling=True,
+        **_VAL_BASE,
     ),
 ]
 
