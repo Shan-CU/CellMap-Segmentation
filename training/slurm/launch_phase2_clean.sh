@@ -27,8 +27,8 @@ mkdir -p runs/ablation/logs
 
 # Phase 2 recipe (from Phase 1 ablation winner)
 LOSS="dice_bce"
-COMMON_2D="--ema --ema_decay 0.999 --weighted_sampler"
-COMMON_3D="--ema --ema_decay 0.999 --weighted_sampler"
+COMMON_2D="--ema --ema_decay 0.999"
+COMMON_3D="--ema --ema_decay 0.999"
 
 # Parse args
 LAUNCH_2D=true
