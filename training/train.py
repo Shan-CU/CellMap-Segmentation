@@ -466,6 +466,8 @@ def train(args: argparse.Namespace) -> None:
     # === Resume from checkpoint ===
     start_epoch = 0
     n_iter = 0
+    best_val_loss = float("inf")
+    best_val_dice = -1.0
     latest_ckpt = ckpt_dir / "latest.pth"
     if latest_ckpt.exists():
         if main_process:
@@ -492,6 +494,12 @@ def train(args: argparse.Namespace) -> None:
             if "best_val_dice" in ckpt:
                 best_val_dice = ckpt["best_val_dice"]
                 print(f"  Restored best_val_dice={best_val_dice:.4f}")
+        else:
+            # Non-main ranks also need the restored metrics for consistent logic
+            if "best_val_loss" in ckpt:
+                best_val_loss = ckpt["best_val_loss"]
+            if "best_val_dice" in ckpt:
+                best_val_dice = ckpt["best_val_dice"]
 
     # === TensorBoard (rank 0 only) ===
     writer = SummaryWriter(str(log_dir)) if main_process else None
@@ -510,8 +518,10 @@ def train(args: argparse.Namespace) -> None:
         print(f"  Input shape: {args.input_shape} | Scale: {args.input_scale}")
         print(f"{'='*60}\n")
 
-    best_val_loss = float("inf")
-    best_val_dice = -1.0
+    # Initialize best metrics (only if not restored from checkpoint above)
+    if best_val_loss == float("inf") and best_val_dice == -1.0:
+        pass  # Already initialized at declaration
+    # (If checkpoint restored values, they are already set)
 
     for epoch in range(start_epoch, args.epochs):
         model.train()

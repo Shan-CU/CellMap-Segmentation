@@ -88,6 +88,7 @@ CMD="torchrun \
     --warmup_epochs 34 \
     --validation_time_limit 600 \
     --val_every_n_epochs 30 \
+    --best_metric val_dice \
     --num_workers 4 \
     --persistent_workers false \
     --amp"
