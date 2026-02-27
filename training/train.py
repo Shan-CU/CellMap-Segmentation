@@ -315,16 +315,30 @@ def train(args: argparse.Namespace) -> None:
     # Intensity augmentation: append to train_raw_value_transforms
     extra_dl_kwargs = {}
 
-    # Memory management: persistent_workers control
-    # CellMapDataLoader.refresh() creates a new PyTorch DataLoader each epoch.
-    # With persistent_workers=True (default when num_workers>0), old worker
-    # processes stay alive and accumulate TensorStore chunk cache, causing
-    # host RAM OOM on large 3D datasets. Setting persistent_workers=False
-    # lets workers die after each refresh, releasing their cache memory.
+    # Memory management: TensorStore cache bounding
+    # Each CellMapImage calls ts.open(context=None), which creates an
+    # independent UNBOUNDED chunk cache per array. With 261 datasets ×
+    # ~49 arrays each = ~12,789 caches that grow without eviction,
+    # consuming 400+ GB within one epoch. Fix: create a single shared
+    # ts.Context with a bounded cache pool and pass to CellMapDataSplit.
+    import tensorstore as ts
+    cache_bytes = args.ts_cache_mb * 1024 * 1024
+    ts_context = ts.Context({"cache_pool": {"total_bytes_limit": cache_bytes}})
+    extra_dl_kwargs["context"] = ts_context
+    if main_process:
+        print(f"TensorStore shared cache pool: {args.ts_cache_mb} MB")
+
+    # persistent_workers control
     if args.persistent_workers != "auto":
         extra_dl_kwargs["persistent_workers"] = (args.persistent_workers == "true")
         if main_process:
             print(f"DataLoader persistent_workers={extra_dl_kwargs['persistent_workers']}")
+    else:
+        # Default: disable persistent workers for 3D to avoid fork overhead
+        if is_3d:
+            extra_dl_kwargs["persistent_workers"] = False
+            if main_process:
+                print("DataLoader persistent_workers=False (auto, 3D mode)")
 
     if args.intensity_aug:
         from training.transforms.intensity import IntensityAugmentation
