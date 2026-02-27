@@ -40,6 +40,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from cellmap_segmentation_challenge.utils import get_dataloader, get_tested_classes
+from cellmap_segmentation_challenge.utils.ddp import (
+    setup_ddp, cleanup_ddp, is_main_process, is_ddp_initialized,
+    reduce_value, sync_across_processes, get_world_size, get_rank,
+)
 from training.models.model_zoo import build_model, MODEL_REGISTRY
 from training.losses.loss_zoo import build_loss, LOSS_REGISTRY
 from training.losses.partial_annotation import FG_THRESHOLD
@@ -131,10 +135,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup_epochs", type=int, default=5)
 
     # Validation
-    parser.add_argument("--validation_time_limit", type=int, default=120,
+    parser.add_argument("--validation_time_limit", type=int, default=600,
                         help="Max seconds for validation per epoch")
     parser.add_argument("--val_every_n_epochs", type=int, default=1,
                         help="Run validation every N epochs")
+    parser.add_argument("--best_metric", type=str, default="val_dice",
+                        choices=["val_loss", "val_dice"],
+                        help="Metric for best checkpoint selection (default: val_dice)")
 
     # Mixed precision
     parser.add_argument("--amp", action="store_true", default=True,
@@ -144,6 +151,13 @@ def parse_args() -> argparse.Namespace:
     # Misc
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--device", type=str, default=None)
+
+    # Memory management (for 3D training OOM prevention)
+    parser.add_argument("--persistent_workers", type=str, default="auto",
+                        choices=["true", "false", "auto"],
+                        help="DataLoader persistent_workers. 'auto' = PyTorch default "
+                             "(True when num_workers>0). Set 'false' to prevent host RAM "
+                             "leak from CellMapDataLoader.refresh() keeping old workers alive.")
 
     args = parser.parse_args()
 
@@ -218,38 +232,54 @@ def get_annotation_mask_from_targets(targets: torch.Tensor) -> torch.Tensor:
 
 
 def train(args: argparse.Namespace) -> None:
-    """Main training loop."""
+    """Main training loop (supports single-GPU and multi-GPU DDP via torchrun)."""
+
+    # === DDP Setup ===
+    local_rank, world_size = setup_ddp()
+    use_ddp = world_size > 1
+    main_process = is_main_process()
 
     # === Setup ===
     torch.backends.cudnn.deterministic = True
-    torch.manual_seed(args.random_seed)
-    np.random.seed(args.random_seed)
-    random.seed(args.random_seed)
+    # Offset seed per rank so each GPU sees different data
+    rank_seed = args.random_seed + get_rank()
+    torch.manual_seed(rank_seed)
+    np.random.seed(rank_seed)
+    random.seed(rank_seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.random_seed)
+        torch.cuda.manual_seed_all(rank_seed)
 
     device = args.device
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
+        if use_ddp:
+            device = f"cuda:{local_rank}"
+        else:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+    if main_process:
+        print(f"Device: {device}" + (f" (DDP: {world_size} GPUs)" if use_ddp else ""))
 
     # === Classes ===
     classes = get_tested_classes()
     num_classes = len(classes)
-    print(f"Training on {num_classes} classes: {classes[:5]}... (showing first 5)")
+    if main_process:
+        print(f"Training on {num_classes} classes: {classes[:5]}... (showing first 5)")
 
-    # === Output directories ===
+    # === Output directories (only rank 0 creates) ===
     run_dir = Path(args.run_dir) / args.experiment_name
     ckpt_dir = run_dir / "checkpoints"
     log_dir = run_dir / "tensorboard"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    if main_process:
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save config
-    config_path = run_dir / "config.json"
-    with open(config_path, "w") as f:
-        json.dump(vars(args), f, indent=2)
-    print(f"Config saved to {config_path}")
+        # Save config
+        config_path = run_dir / "config.json"
+        config_dict = vars(args).copy()
+        config_dict["ddp_world_size"] = world_size
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=2)
+        print(f"Config saved to {config_path}")
+    sync_across_processes()  # Ensure dirs exist before other ranks proceed
 
     # === Data ===
     input_array_info = {
@@ -276,13 +306,26 @@ def train(args: argparse.Namespace) -> None:
             "rotate": {"axes": {"x": [-180, 180], "y": [-180, 180]}},
         }
 
-    print("Loading data...")
+    if main_process:
+        print("Loading data...")
     # Keep data on CPU during loading to avoid CUDA OOM from pre-moving
     # all ~784 dataset EmptyImage tensors to GPU. The training loop already
     # handles per-batch .to(device) for inputs and targets.
 
     # Intensity augmentation: append to train_raw_value_transforms
     extra_dl_kwargs = {}
+
+    # Memory management: persistent_workers control
+    # CellMapDataLoader.refresh() creates a new PyTorch DataLoader each epoch.
+    # With persistent_workers=True (default when num_workers>0), old worker
+    # processes stay alive and accumulate TensorStore chunk cache, causing
+    # host RAM OOM on large 3D datasets. Setting persistent_workers=False
+    # lets workers die after each refresh, releasing their cache memory.
+    if args.persistent_workers != "auto":
+        extra_dl_kwargs["persistent_workers"] = (args.persistent_workers == "true")
+        if main_process:
+            print(f"DataLoader persistent_workers={extra_dl_kwargs['persistent_workers']}")
+
     if args.intensity_aug:
         from training.transforms.intensity import IntensityAugmentation
         intensity_aug = IntensityAugmentation()
@@ -292,7 +335,8 @@ def train(args: argparse.Namespace) -> None:
             intensity_aug,
         ])
         extra_dl_kwargs["train_raw_value_transforms"] = custom_train_transforms
-        print(f"Intensity augmentation enabled: {intensity_aug}")
+        if main_process:
+            print(f"Intensity augmentation enabled: {intensity_aug}")
 
     # Class-aware sampling: build custom sampler callable
     # We need to create it AFTER the dataloader is built (needs access to
@@ -324,10 +368,12 @@ def train(args: argparse.Namespace) -> None:
         )
         train_loader.sampler = sampler_fn
         train_loader.refresh()
-        print("Class-aware crop weighting sampler enabled (blend=0.7)")
-    print(f"Train loader: {len(train_loader.loader)} batches/epoch")
-    if val_loader is not None:
-        print(f"Val loader: {len(val_loader.loader)} batches")
+        if main_process:
+            print("Class-aware crop weighting sampler enabled (blend=0.7)")
+    if main_process:
+        print(f"Train loader: {len(train_loader.loader)} batches/epoch")
+        if val_loader is not None:
+            print(f"Val loader: {len(val_loader.loader)} batches")
 
     # === Model ===
     model_kwargs = {"num_classes": num_classes, "in_channels": 1}
@@ -341,14 +387,25 @@ def train(args: argparse.Namespace) -> None:
 
     model = build_model(args.model, **model_kwargs)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model: {args.model} ({n_params:,} trainable params)")
+    if main_process:
+        print(f"Model: {args.model} ({n_params:,} trainable params)")
     model = model.to(device)
 
+    # === DDP model wrapping ===
+    if use_ddp:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
+        if main_process:
+            print(f"Model wrapped in DDP (device_ids=[{local_rank}])")
+
     # === EMA ===
+    # EMA tracks the unwrapped model parameters
     ema_model = None
     if args.ema:
-        ema_model = ModelEMA(model, decay=args.ema_decay)
-        print(f"EMA enabled (decay={args.ema_decay})")
+        unwrapped = model.module if use_ddp else model
+        ema_model = ModelEMA(unwrapped, decay=args.ema_decay)
+        if main_process:
+            print(f"EMA enabled (decay={args.ema_decay})")
 
     # === Loss ===
     loss_kwargs = {"num_classes": num_classes}
@@ -362,17 +419,20 @@ def train(args: argparse.Namespace) -> None:
             base_loss=loss_fn,
             weights=args.ds_weights,
         )
-        print(f"Deep supervision enabled (weights={args.ds_weights})")
+        if main_process:
+            print(f"Deep supervision enabled (weights={args.ds_weights})")
     if hasattr(loss_fn, 'to'):
         loss_fn = loss_fn.to(device)
-    print(f"Loss: {args.loss}")
+    if main_process:
+        print(f"Loss: {args.loss}")
 
     # Check if loss supports annotation mask / foreground mask
     has_annotation_mask = hasattr(loss_fn, 'set_annotation_mask')
     has_foreground_mask = hasattr(loss_fn, 'set_foreground_mask')
-    print(f"  annotation_mask support: {has_annotation_mask}")
-    print(f"  foreground_mask support: {has_foreground_mask}")
-    print(f"  foreground_mask enabled: {args.use_foreground_mask}")
+    if main_process:
+        print(f"  annotation_mask support: {has_annotation_mask}")
+        print(f"  foreground_mask support: {has_foreground_mask}")
+        print(f"  foreground_mask enabled: {args.use_foreground_mask}")
 
     # === Optimizer ===
     optimizer = torch.optim.RAdam(
@@ -408,9 +468,15 @@ def train(args: argparse.Namespace) -> None:
     n_iter = 0
     latest_ckpt = ckpt_dir / "latest.pth"
     if latest_ckpt.exists():
-        print(f"Resuming from {latest_ckpt}")
+        if main_process:
+            print(f"Resuming from {latest_ckpt}")
         ckpt = torch.load(latest_ckpt, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
+        # For DDP, load into the unwrapped model
+        state_dict = ckpt["model_state_dict"]
+        if use_ddp:
+            model.module.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         start_epoch = ckpt["epoch"]
         n_iter = ckpt["n_iter"]
@@ -418,25 +484,34 @@ def train(args: argparse.Namespace) -> None:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         if ema_model is not None and "ema_state_dict" in ckpt:
             ema_model.load_state_dict(ckpt["ema_state_dict"])
-        print(f"  Resumed at epoch {start_epoch}, iter {n_iter}")
+        if main_process:
+            print(f"  Resumed at epoch {start_epoch}, iter {n_iter}")
+            if "best_val_loss" in ckpt:
+                best_val_loss = ckpt["best_val_loss"]
+                print(f"  Restored best_val_loss={best_val_loss:.4f}")
+            if "best_val_dice" in ckpt:
+                best_val_dice = ckpt["best_val_dice"]
+                print(f"  Restored best_val_dice={best_val_dice:.4f}")
 
-    # === TensorBoard ===
-    writer = SummaryWriter(str(log_dir))
+    # === TensorBoard (rank 0 only) ===
+    writer = SummaryWriter(str(log_dir)) if main_process else None
 
     # Get data keys
     input_keys = list(train_loader.dataset.input_arrays.keys())
     target_keys = list(train_loader.dataset.target_arrays.keys())
 
     # === Training ===
-    print(f"\n{'='*60}")
-    print(f"Starting training: {args.experiment_name}")
-    print(f"  Model: {args.model} | Loss: {args.loss}")
-    print(f"  Epochs: {args.epochs} | Iters/epoch: {args.iterations_per_epoch}")
-    print(f"  Batch size: {args.batch_size} | LR: {args.learning_rate}")
-    print(f"  Input shape: {args.input_shape} | Scale: {args.input_scale}")
-    print(f"{'='*60}\n")
+    if main_process:
+        print(f"\n{'='*60}")
+        print(f"Starting training: {args.experiment_name}")
+        print(f"  Model: {args.model} | Loss: {args.loss}")
+        print(f"  Epochs: {args.epochs} | Iters/epoch: {args.iterations_per_epoch}")
+        print(f"  Batch size: {args.batch_size}" + (f" x {world_size} GPUs = {args.batch_size * world_size} effective" if use_ddp else "") + f" | LR: {args.learning_rate}")
+        print(f"  Input shape: {args.input_shape} | Scale: {args.input_scale}")
+        print(f"{'='*60}\n")
 
     best_val_loss = float("inf")
+    best_val_dice = -1.0
 
     for epoch in range(start_epoch, args.epochs):
         model.train()
@@ -449,11 +524,16 @@ def train(args: argparse.Namespace) -> None:
         epoch_loss = 0.0
         optimizer.zero_grad()
 
-        epoch_bar = tqdm(
-            range(args.iterations_per_epoch),
-            desc=f"Epoch {epoch+1}/{args.epochs}",
-            dynamic_ncols=True,
-        )
+        # Only show progress bar on rank 0
+        step_iter = range(args.iterations_per_epoch)
+        if main_process:
+            epoch_bar = tqdm(
+                step_iter,
+                desc=f"Epoch {epoch+1}/{args.epochs}",
+                dynamic_ncols=True,
+            )
+        else:
+            epoch_bar = step_iter
 
         for step in epoch_bar:
             batch = next(loader)
@@ -521,27 +601,34 @@ def train(args: argparse.Namespace) -> None:
                 optimizer.zero_grad()
                 if scheduler is not None:
                     scheduler.step()
-                # EMA update
+                # EMA update (track unwrapped model for DDP compatibility)
                 if ema_model is not None:
-                    ema_model.update(model)
+                    unwrapped_m = model.module if use_ddp else model
+                    ema_model.update(unwrapped_m)
 
             loss_val = loss.item() * args.gradient_accumulation_steps
             epoch_loss += loss_val
 
-            epoch_bar.set_postfix({
-                "loss": f"{loss_val:.4f}",
-                "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
-            })
-
-            writer.add_scalar("train/loss", loss_val, n_iter)
+            if main_process:
+                epoch_bar.set_postfix({
+                    "loss": f"{loss_val:.4f}",
+                    "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
+                })
+                writer.add_scalar("train/loss", loss_val, n_iter)
 
         avg_train_loss = epoch_loss / args.iterations_per_epoch
-        writer.add_scalar("train/epoch_loss", avg_train_loss, epoch + 1)
-        writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], epoch + 1)
+        # Reduce train loss across ranks for accurate logging
+        if use_ddp:
+            avg_train_loss = reduce_value(avg_train_loss, op="mean")
+        if main_process:
+            writer.add_scalar("train/epoch_loss", avg_train_loss, epoch + 1)
+            writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], epoch + 1)
 
         # === Validation ===
         if val_loader is not None and (epoch + 1) % args.val_every_n_epochs == 0:
-            eval_model = ema_model.shadow if ema_model is not None else model
+            # For eval, use EMA shadow (unwrapped) or the unwrapped model
+            unwrapped = model.module if use_ddp else model
+            eval_model = ema_model.shadow if ema_model is not None else unwrapped
             eval_model.eval()
             if hasattr(loss_fn, 'eval'):
                 loss_fn.eval()
@@ -549,6 +636,11 @@ def train(args: argparse.Namespace) -> None:
             val_loss = 0.0
             val_steps = 0
             val_start = time.time()
+
+            # Per-class Dice accumulators: TP, FP, FN for each of num_classes channels
+            dice_tp = torch.zeros(num_classes, device=device)
+            dice_fp = torch.zeros(num_classes, device=device)
+            dice_fn = torch.zeros(num_classes, device=device)
 
             val_loader.refresh()
             torch.cuda.empty_cache()
@@ -593,42 +685,129 @@ def train(args: argparse.Namespace) -> None:
                         val_loss += vloss.item()
                         val_steps += 1
 
+                    # --- Per-class Dice accumulation ---
+                    # Use the single-scale logits for Dice (not DS list)
+                    dice_logits = logits[0] if isinstance(logits, (list, tuple)) else logits
+                    preds = (torch.sigmoid(dice_logits.float()) > 0.5).float()  # (B, C, *spatial)
+                    gt = targets_clean.float()  # (B, C, *spatial)
+                    # Mask: only count annotated voxels (non-NaN in original targets)
+                    # annotation_mask is (B, C) — per-channel, but we also need spatial NaN mask
+                    valid = targets.isnan().logical_not().float()  # (B, C, *spatial)
+                    spatial_dims = tuple(range(2, preds.ndim))
+                    # TP/FP/FN per class, masked by valid voxels
+                    dice_tp += (preds * gt * valid).sum(dim=(0, *spatial_dims))
+                    dice_fp += (preds * (1 - gt) * valid).sum(dim=(0, *spatial_dims))
+                    dice_fn += ((1 - preds) * gt * valid).sum(dim=(0, *spatial_dims))
+
                     if time.time() - val_start > args.validation_time_limit:
                         break
 
             avg_val_loss = val_loss / max(val_steps, 1)
-            writer.add_scalar("val/loss", avg_val_loss, epoch + 1)
-            print(f"  Val loss: {avg_val_loss:.4f} ({val_steps} batches)")
 
-            # Save best model (EMA if available, else regular)
-            # Skip when val_steps=0 — avg_val_loss=0.0 is fake, not a real improvement
-            if val_steps > 0 and avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
-                best_state = ema_model.state_dict() if ema_model is not None else model.state_dict()
-                torch.save(best_state, ckpt_dir / "best.pth")
-                print(f"  New best model saved (val_loss={avg_val_loss:.4f})")
+            # Reduce val loss and Dice accumulators across ranks
+            if use_ddp:
+                avg_val_loss = reduce_value(avg_val_loss, op="mean")
+                # Sum TP/FP/FN across ranks
+                torch.distributed.all_reduce(dice_tp)
+                torch.distributed.all_reduce(dice_fp)
+                torch.distributed.all_reduce(dice_fn)
 
-        # === Save checkpoint ===
-        ckpt_data = {
-            "epoch": epoch + 1,
-            "n_iter": n_iter,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_loss": avg_train_loss,
-        }
-        if scheduler is not None:
-            ckpt_data["scheduler_state_dict"] = scheduler.state_dict()
-        if ema_model is not None:
-            ckpt_data["ema_state_dict"] = ema_model.state_dict()
-        torch.save(ckpt_data, ckpt_dir / "latest.pth")
+            # Compute per-class Dice: 2*TP / (2*TP + FP + FN)
+            denom = 2 * dice_tp + dice_fp + dice_fn
+            per_class_dice = torch.where(
+                denom > 0,
+                2 * dice_tp / denom,
+                torch.zeros_like(denom),  # 0 if no voxels seen for this class
+            )  # (num_classes,)
+            # Mean Dice over classes that had any ground truth or prediction
+            has_voxels = denom > 0
+            mean_dice = per_class_dice[has_voxels].mean().item() if has_voxels.any() else 0.0
 
-        # Save periodic checkpoints
-        if (epoch + 1) % 10 == 0:
-            torch.save(ckpt_data, ckpt_dir / f"epoch_{epoch+1}.pth")
+            if main_process:
+                writer.add_scalar("val/loss", avg_val_loss, epoch + 1)
+                writer.add_scalar("val/mean_dice", mean_dice, epoch + 1)
+                # Log per-class Dice
+                for ci, cname in enumerate(classes):
+                    writer.add_scalar(f"val_dice/{cname}", per_class_dice[ci].item(), epoch + 1)
+                # Print summary
+                n_active = has_voxels.sum().item()
+                print(f"  Val loss: {avg_val_loss:.4f} | Mean Dice: {mean_dice:.4f} "
+                      f"({n_active}/{num_classes} classes) [{val_steps} batches, "
+                      f"{time.time() - val_start:.0f}s]")
+                # Print top-5 and bottom-5 classes by Dice (among active)
+                if n_active > 0:
+                    active_indices = has_voxels.nonzero(as_tuple=True)[0]
+                    active_dices = per_class_dice[active_indices]
+                    sorted_idx = active_dices.argsort(descending=True)
+                    top_n = min(5, len(sorted_idx))
+                    top_str = ", ".join(
+                        f"{classes[active_indices[sorted_idx[i]].item()]}={active_dices[sorted_idx[i]]:.3f}"
+                        for i in range(top_n)
+                    )
+                    bot_str = ", ".join(
+                        f"{classes[active_indices[sorted_idx[-i-1]].item()]}={active_dices[sorted_idx[-i-1]]:.3f}"
+                        for i in range(top_n)
+                    )
+                    print(f"    Top-5: {top_str}")
+                    print(f"    Bot-5: {bot_str}")
 
-    writer.close()
-    print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
-    print(f"Outputs saved to: {run_dir}")
+                # Save best model (EMA if available, else regular unwrapped)
+                is_new_best = False
+                if args.best_metric == "val_dice":
+                    if val_steps > 0 and mean_dice > best_val_dice:
+                        best_val_dice = mean_dice
+                        is_new_best = True
+                else:  # val_loss
+                    if val_steps > 0 and avg_val_loss < best_val_loss:
+                        best_val_loss = avg_val_loss
+                        is_new_best = True
+                # Always track both
+                if val_steps > 0:
+                    if avg_val_loss < best_val_loss:
+                        best_val_loss = avg_val_loss
+                    if mean_dice > best_val_dice:
+                        best_val_dice = mean_dice
+                if is_new_best:
+                    best_state = ema_model.state_dict() if ema_model is not None else unwrapped.state_dict()
+                    torch.save(best_state, ckpt_dir / "best.pth")
+                    metric_str = f"mean_dice={mean_dice:.4f}" if args.best_metric == "val_dice" else f"val_loss={avg_val_loss:.4f}"
+                    print(f"  New best model saved ({metric_str})")
+
+        # === Save checkpoint (rank 0 only) ===
+        if main_process:
+            unwrapped = model.module if use_ddp else model
+            ckpt_data = {
+                "epoch": epoch + 1,
+                "n_iter": n_iter,
+                "model_state_dict": unwrapped.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "train_loss": avg_train_loss,
+                "best_val_loss": best_val_loss,
+                "best_val_dice": best_val_dice,
+            }
+            if scheduler is not None:
+                ckpt_data["scheduler_state_dict"] = scheduler.state_dict()
+            if ema_model is not None:
+                ckpt_data["ema_state_dict"] = ema_model.state_dict()
+            torch.save(ckpt_data, ckpt_dir / "latest.pth")
+
+            # Save periodic checkpoints
+            if (epoch + 1) % 10 == 0:
+                torch.save(ckpt_data, ckpt_dir / f"epoch_{epoch+1}.pth")
+
+        # Sync all ranks after checkpoint save
+        sync_across_processes()
+
+    if main_process:
+        writer.close()
+        print(f"\nTraining complete.")
+        print(f"  Best val loss: {best_val_loss:.4f}")
+        print(f"  Best mean Dice: {best_val_dice:.4f}")
+        print(f"  Best checkpoint metric: {args.best_metric}")
+        print(f"  Outputs saved to: {run_dir}")
+
+    # === DDP Cleanup ===
+    cleanup_ddp()
 
 
 if __name__ == "__main__":
