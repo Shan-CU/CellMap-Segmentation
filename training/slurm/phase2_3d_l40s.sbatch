@@ -104,10 +104,11 @@ CMD="python -m training.train \
     --scheduler cosine \
     --warmup_epochs 34 \
     --validation_time_limit 600 \
-    --val_every_n_epochs 30 \
+    --val_every_n_epochs 5 \
     --best_metric val_dice \
     --num_workers 4 \
-    --amp"
+    --amp \
+    --ema --ema_decay 0.999"
 
 if [ "${USE_FG_MASK}" = "false" ]; then
     CMD="${CMD} --no_foreground_mask"

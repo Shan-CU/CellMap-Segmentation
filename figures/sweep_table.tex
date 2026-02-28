@@ -1,0 +1,64 @@
+\documentclass[border=10pt]{standalone}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{colortbl}
+\usepackage{array}
+
+\definecolor{gold}{HTML}{CFB87C}
+\definecolor{dkblue}{HTML}{156082}
+\definecolor{accent3}{HTML}{196B24}
+\definecolor{accent2}{HTML}{E97132}
+\definecolor{dkgray}{HTML}{333333}
+\definecolor{ltgray}{HTML}{F8F6F0}
+\definecolor{headbg}{HTML}{156082}
+\definecolor{headfg}{HTML}{FFFFFF}
+\definecolor{totalbg}{HTML}{F5F0E6}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+\begin{document}
+\renewcommand{\arraystretch}{1.7}
+\large
+\begin{tabular}{L{5.5cm} C{3.5cm} C{2.5cm} L{7.5cm}}
+\toprule
+\rowcolor{headbg}
+\textcolor{headfg}{\textbf{Sweep}} &
+\textcolor{headfg}{\textbf{Tests}} &
+\textcolor{headfg}{\textbf{\# Exps}} &
+\textcolor{headfg}{\textbf{Key Variables}} \\
+\midrule
+\rowcolor{white}
+\textbf{A:} Loss Function &
+Which base loss &
+8 &
+BCE, Focal, Tversky, BST, \ldots \\
+\rowcolor{ltgray}
+\textbf{B:} Tversky $\alpha/\beta$ &
+Precision--recall &
+6 &
+$\alpha \in \{0.3\text{--}0.8\}$, $\beta \in \{0.3\text{--}0.7\}$ \\
+\rowcolor{white}
+\textbf{C:} Class Weight ($\tau$) &
+Logit adjustment &
+5 &
+$\tau \in \{0.0, 0.5, 1.0, 1.5, 2.0\}$ \\
+\rowcolor{ltgray}
+\textbf{D:} Masking Strategy &
+Spatial masking &
+7 &
+FG, BBox, MaskSup, combinations \\
+\rowcolor{white}
+\textbf{E:} Training Techniques &
+EMA, sampler, DS &
+3--4 &
+EMA(0.999), weighted sampler, DS \\
+\midrule
+\rowcolor{totalbg}
+\multicolumn{2}{l}{\textbf{Total}} &
+\textbf{29+30} &
+\textbf{29$\times$2D + 30$\times$3D = 59 experiments} \\
+\bottomrule
+\end{tabular}
+\end{document}

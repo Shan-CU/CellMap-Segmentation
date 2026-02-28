@@ -1,24 +1,32 @@
 #!/bin/bash
 # ============================================================================
-# Phase 2: Architecture Comparison — Clean Launch Script
+# Phase 2: Architecture Comparison — Clean Launch Script (v2)
 # ============================================================================
 # Submits all 9 experiments (4× 2D + 5× 3D) with the Phase 1 winning recipe:
 #   dice_bce + EMA(0.999) + fg_mask ON + weighted_sampler ON
+#
+# v2 fixes (2026-02-28):
+#   - EMA was missing from v1 launch (--ema flag not passed). Now baked into
+#     both sbatch files. EXTRA_ARGS passes it too for safety.
+#   - SegResNet switched from BST back to dice_bce + --deep_supervision.
+#     Deep supervision prevents the logit explosion that made DiceBCE fail.
+#   - ViT 2D batch reduced to 4 (CUDA kernel launch error at batch=8).
+#   - All 3D models use batch=8, 96^3 crops, LR scaled linearly from 1e-4@b2.
 #
 # Usage:
 #   cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 #   bash training/slurm/launch_phase2_clean.sh [--3d-only] [--2d-only]
 #
 # Run directory structure (all under runs/ablation/):
-#   arch_2d_resnet/   → {config.json, checkpoints/, tensorboard/}
-#   arch_2d_unet/
-#   arch_2d_swin/
-#   arch_2d_vit/
-#   arch_3d_segresnet/
-#   arch_3d_swinunetr/
-#   arch_3d_unet/
-#   arch_3d_resnet/
-#   arch_3d_vitnet/
+#   p2_resnet_2d/   → {config.json, checkpoints/, tensorboard/}
+#   p2_unet_2d/
+#   p2_swin_2d/
+#   p2_vit_2d/
+#   p2_segresnet_3d/
+#   p2_swinunetr_3d/
+#   p2_unet_3d/
+#   p2_resnet_3d/
+#   p2_vitnet_3d/
 # ============================================================================
 
 set -euo pipefail
@@ -48,21 +56,22 @@ echo ""
 
 # ============================================================================
 # 3D MODELS
-# L40S single GPU, batch=2, 128³ patches, 1000ep × 300it
-# TensorStore cache bounded at 2 GiB by cellmap-data (no OOM risk)
+# L40S single GPU, batch=8, 96³ patches, 1000ep × 300it
+# LR scaled linearly: base 1e-4 @ batch=2 → 4e-4 @ batch=8
+# SegResNet uses dice_bce + deep_supervision (NOT BST).
 # ============================================================================
 if $LAUNCH_3D; then
-    echo "--- 3D Models (L40S, single GPU, batch=2) ---"
+    echo "--- 3D Models (L40S, single GPU, batch=8, 96³) ---"
 
     for spec in \
-        "segresnet:segresnet_3d:2:--deep_supervision" \
-        "swinunetr:swinunetr_3d:2:" \
-        "unet:unet_3d:2:" \
-        "resnet:resnet_3d:2:" \
-        "vitnet:vitnet_3d:1:"; do
+        "segresnet:segresnet_3d:8:--deep_supervision" \
+        "swinunetr:swinunetr_3d:8:" \
+        "unet:unet_3d:8:" \
+        "resnet:resnet_3d:8:" \
+        "vitnet:vitnet_3d:8:"; do
 
         IFS=':' read -r NAME MODEL BATCH EXTRA <<< "$spec"
-        JOB="arch_3d_${NAME}"
+        JOB="p2_${MODEL}"
         echo "  Submitting ${JOB} (model=${MODEL}, batch=${BATCH})..."
 
         EXPERIMENT_NAME="${JOB}" \
@@ -84,25 +93,27 @@ fi
 # ============================================================================
 # 2D MODELS
 # L40S single GPU, batch=8, 256×256 patches, 100ep × 1000it
+# ViT uses batch=4 to avoid CUDA kernel launch error (cudaErrorInvalidConfiguration
+# from BatchNorm2d backward pass at batch=8 + AMP on L40S Ada Lovelace).
 # ============================================================================
 if $LAUNCH_2D; then
-    echo "--- 2D Models (L40S, single GPU, batch=8) ---"
+    echo "--- 2D Models (L40S, single GPU) ---"
 
     for spec in \
-        "resnet:resnet_2d" \
-        "unet:unet_2d" \
-        "swin:swin_2d" \
-        "vit:vit_2d"; do
+        "resnet_2d:8" \
+        "unet_2d:8" \
+        "swin_2d:8" \
+        "vit_2d:4"; do
 
-        IFS=':' read -r NAME MODEL <<< "$spec"
-        JOB="arch_2d_${NAME}"
-        echo "  Submitting ${JOB} (model=${MODEL})..."
+        IFS=':' read -r MODEL BATCH <<< "$spec"
+        JOB="p2_${MODEL}"
+        echo "  Submitting ${JOB} (model=${MODEL}, batch=${BATCH})..."
 
         EXPERIMENT_NAME="${JOB}" \
         MODEL_NAME="${MODEL}" \
         LOSS_NAME="${LOSS}" \
         USE_FG_MASK="true" \
-        BATCH_SIZE=8 \
+        BATCH_SIZE="${BATCH}" \
         EPOCHS=100 \
         ITERS=1000 \
         EXTRA_ARGS="${COMMON_2D}" \
@@ -114,15 +125,12 @@ if $LAUNCH_2D; then
     echo ""
 fi
 
-# ============================================================================
-# TENSORBOARD
-# ============================================================================
-echo "--- TensorBoard ---"
-sbatch --job-name="tb_phase2" training/slurm/tensorboard.sbatch
-echo ""
-
 echo "============================================"
 echo "All jobs submitted. Monitor with:"
 echo "  squeue -u gsgeorge"
-echo "  ssh -L 6006:<tb_node>:6006 longleaf.unc.edu"
+echo ""
+echo "TensorBoard (run on sycamore):"
+echo "  /nas/longleaf/home/gsgeorge/micromamba/envs/csc/bin/tensorboard \\"
+echo "    --logdir /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/runs/ablation \\"
+echo "    --port 6006 --host 0.0.0.0 --reload_interval 15 --reload_multifile true"
 echo "============================================"

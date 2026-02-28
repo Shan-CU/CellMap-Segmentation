@@ -15,8 +15,8 @@
 # Recipe: dice_bce + EMA(0.999) + fg_mask ON + weighted_sampler ON
 # Models: resnet_2d, unet_2d, swin_2d, vit_2d
 # Training: 100 epochs × 1000 iters, batch=8, 256×256 patches
-# Validation: every 10 epochs with per-class Dice (48 classes)
-# Best model saved by val_dice; periodic checkpoints every 10 epochs
+# Validation: every 5 epochs with per-class Dice (48 classes, 600s time limit)
+# Matches 3D val frequency for apples-to-apples comparison in paper.
 # ============================================================================
 
 set -euo pipefail
@@ -47,6 +47,12 @@ micromamba activate csc
 cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 mkdir -p runs/ablation/logs
 
+# --- Memory leak mitigations (same as 3D sbatch) ---
+export CELLMAP_TENSORSTORE_CACHE_BYTES=1
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=65536
+export MALLOC_MMAP_THRESHOLD_=65536
+
 CMD="python -m training.train \
     --experiment_name ${EXPERIMENT_NAME} \
     --run_dir runs/ablation \
@@ -62,10 +68,11 @@ CMD="python -m training.train \
     --scheduler cosine \
     --warmup_epochs 10 \
     --validation_time_limit 600 \
-    --val_every_n_epochs 10 \
+    --val_every_n_epochs 5 \
     --best_metric val_dice \
     --num_workers 8 \
-    --amp"
+    --amp \
+    --ema --ema_decay 0.999"
 
 if [ "${USE_FG_MASK}" = "false" ]; then
     CMD="${CMD} --no_foreground_mask"

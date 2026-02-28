@@ -352,63 +352,73 @@ All 29 3D experiments are complete. See Section 4 for full Dice eval results.
 ### Configuration ✅ FINALIZED
 
 ```python
-# In training/configs/experiments.py
-loss = "dice_bce"
+# Phase 2 recipe (from Phase 1 ablation winner)
+loss = "dice_bce"           # SegResNet too (with deep_supervision)
 use_foreground_mask = True
 ema = True
 ema_decay = 0.999
-epochs = 100              # 2× ablation
-iterations_per_epoch = 1000  # 2D (500 for 3D)
-val_every_n_epochs = 5
-intensity_aug = False      # DISABLED — hurt −23%
-class_aware_sampling = False  # DISABLED — hurt −38%
+weighted_sampler = True     # cellmap-data default
+intensity_aug = False        # DISABLED — hurt −23%
+class_aware_sampling = False # DISABLED — hurt −38%
+
+# 2D settings
+epochs_2d = 100
+iterations_per_epoch_2d = 1000
+val_every_n_epochs_2d = 5
+warmup_epochs_2d = 10
+batch_size_2d = 8            # (ViT uses 4 due to CUDA kernel bug)
+lr_2d = 1e-4
+
+# 3D settings
+epochs_3d = 1000
+iterations_per_epoch_3d = 300
+val_every_n_epochs_3d = 5
+warmup_epochs_3d = 34
+batch_size_3d = 8
+lr_3d = 4e-4                 # linearly scaled from 1e-4 @ batch=2
+input_shape_3d = [96, 96, 96]  # 768nm box, 152 datasets (vs 78 at 128^3)
 ```
 
-### ⚠️ IMPORTANT: Update Phase 2 Defaults Before Launching
+### ⚠️ Phase 2 Launch History
 
-The `make_arch_comparison_2d()` and `make_arch_comparison_3d()` functions in `training/configs/experiments.py` still have `loss="balanced_softmax_tversky"` as default. **These MUST be updated to `loss="dice_bce"` before launching Phase 2.**
+**v1 launch (Feb 27):** Missing `--ema` flag (sbatch had `--ema_decay 0.999` but not `--ema`).
+SegResNet used BST instead of dice_bce. ViT crashed (CUDA kernel error at batch=8).
+All 8 jobs killed and relaunched as v2.
 
-Similarly, `training/slurm/launch_arch_comparison.sh` has `BEST_LOSS="balanced_softmax_tversky"` — also needs updating.
+**v2 launch (Feb 28):** All fixes applied:
+- EMA enabled (`--ema --ema_decay 0.999` baked into both sbatch files)
+- SegResNet switched to `dice_bce + --deep_supervision`
+- ViT batch reduced to 4 (CUDA kernel launch bug with BatchNorm2d + AMP at batch=8)
+- All 9 models on Longleaf L40S single GPU
 
-### 2D Runs (Longleaf L40S)
+### 2D Runs (Longleaf L40S, 100ep × 1000it)
 
-| Model | Est. Time | Input Shape | Params |
-|-------|-----------|-------------|--------|
-| `resnet_2d` (FlexUNet-ResNet34) | ~6h | [1, 256, 256] | ~7.8M |
-| `unet_2d` | ~5h | [1, 256, 256] | ~31M |
-| `swin_2d` (SwinTransformer) | ~10h | [1, 256, 256] | ~36M |
-| `vit_2d` (ViTVNet) | ~10h | [1, 256, 256] | ~105M |
+| Job Name | Model | Batch | Params | Loss |
+|----------|-------|-------|--------|------|
+| `p2_resnet_2d` | FlexUNet-ResNet34 | 8 | ~7.8M | dice_bce |
+| `p2_unet_2d` | CSC UNet 2D | 8 | ~31M | dice_bce |
+| `p2_swin_2d` | SwinTransformer 2D | 8 | ~36M | dice_bce |
+| `p2_vit_2d` | ViTVNet 2D | **4** | ~105M | dice_bce |
 
-### 3D Runs (Sycamore H100 — `h100_sn` ONLY)
+### 3D Runs (Longleaf L40S, 1000ep × 300it, 96³ crops)
 
-| Model | Est. Time | Input Shape | Batch | Params |
-|-------|-----------|-------------|-------|--------|
-| `segresnet_3d` (SegResNetDS) | ~24h | [128, 128, 128] | 2 | ~18M |
-| `swinunetr_3d` (SwinUNETR) | ~36h | [128, 128, 128] | 2 | ~62M |
-| `unet_3d` | ~18h | [128, 128, 128] | 2 | - |
-| `resnet_3d` | ~20h | [128, 128, 128] | 2 | - |
+| Job Name | Model | Batch | Params | Loss | Extra |
+|----------|-------|-------|--------|------|-------|
+| `p2_segresnet_3d` | SegResNetDS | 8 | ~20M | **dice_bce** | `--deep_supervision` |
+| `p2_swinunetr_3d` | SwinUNETR | 8 | ~62M | dice_bce | |
+| `p2_unet_3d` | MONAI UNet 3D | 8 | ~90M | dice_bce | |
+| `p2_resnet_3d` | MONAI ResNet 3D | 8 | ~24M | dice_bce | |
+| `p2_vitnet_3d` | MONAI ViTAutoEnc | 8 | ~32M | dice_bce | |
 
-### Launch Commands
+### Launch Command
 
 ```bash
-# 2D on Longleaf (repeat for each model: resnet_2d, unet_2d, swin_2d, vit_2d)
-ssh longleaf.unc.edu 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=arch_2d_resnet MODEL_NAME=resnet_2d LOSS_NAME=dice_bce \
-  USE_FG_MASK=true EPOCHS=100 ITERS=1000 \
-  EXTRA_ARGS="--ema --ema_decay 0.999 --val_every_n_epochs 5" \
-  sbatch --export=ALL --job-name=arch_2d_resnet training/slurm/ablation_2d_l40s.sbatch'
-
-# 3D on Sycamore (repeat for each model: segresnet_3d, swinunetr_3d, unet_3d, resnet_3d)
-ssh sycamore 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=arch_3d_segresnet MODEL_NAME=segresnet_3d LOSS_NAME=dice_bce \
-  USE_FG_MASK=true EPOCHS=100 ITERS=500 BATCH_SIZE=2 \
-  EXTRA_ARGS="--ema --ema_decay 0.999 --val_every_n_epochs 5 --input_shape 128 128 128" \
-  sbatch --export=ALL --job-name=arch_3d_segresnet \
-  --partition=h100_sn --account=rc_alain_pi \
-  training/slurm/ablation_3d_h100.sbatch'
+# From longleaf login node:
+cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
+bash training/slurm/launch_phase2_clean.sh        # all 9 jobs
+bash training/slurm/launch_phase2_clean.sh --2d-only  # 4 × 2D only
+bash training/slurm/launch_phase2_clean.sh --3d-only  # 5 × 3D only
 ```
-
-Add `--intensity_aug` and/or `--class_aware_sampling` to `EXTRA_ARGS` if validation results are positive.
 
 ---
 
@@ -430,11 +440,13 @@ BST with AMP float16 can produce inf logits due to the τ×log(π_c) adjustment 
 cellmap-data pre-allocates `EmptyImage` tensors for all ~784 datasets on initialization. This requires ~300GB host RAM. Jobs must request ≥384G memory. Data should be loaded on CPU (`device="cpu"` in get_dataloader) and batches moved to GPU in the training loop.
 
 ### Git State
-As of commit `e5d9f92` (Feb 25, 2026):
-- All Phase 1 infrastructure is committed
-- Intensity augmentation and class-aware sampling are committed
-- 3 validation experiment configs are committed
-- Phase 2 defaults still reference BST (need updating before Phase 2 launch)
+As of Phase 2 v2 relaunch (Feb 28, 2026):
+- All Phase 1 infrastructure committed
+- Memory leak fix committed (2c4aa84): cellmap-data PR#64 + monkey-patch + MALLOC_ARENA_MAX=2
+- Phase 2 sbatch files have `--ema --ema_decay 0.999` baked in
+- SegResNet uses `dice_bce + --deep_supervision` (not BST)
+- ViT batch=4 fix in launch script
+- Launch script: `training/slurm/launch_phase2_clean.sh`
 
 ---
 
@@ -535,20 +547,11 @@ python -m training.eval_2d_perclass \
 
 ## Next Steps (for continuing agent)
 
-1. ~~Check validation results~~ ✅ Done — intensity_aug (−23%), crop_weights (−38%), combined (−54%). All hurt. Excluded.
-2. ~~Check remaining 3D results~~ ✅ Done — All 29 3D experiments complete. 3D ablation was non-functional (max Dice 0.017).
-3. **Update Phase 2 defaults** — in `training/configs/experiments.py`:
-   - Change `make_arch_comparison_2d()` and `make_arch_comparison_3d()` defaults:
-     - `loss="dice_bce"` (not `"balanced_softmax_tversky"`)
-     - `ema=True, ema_decay=0.999`
-     - `use_foreground_mask=True`
-     - `intensity_aug=False, class_aware_sampling=False`
-   - Update `training/slurm/launch_arch_comparison.sh` `BEST_LOSS` variable
-4. **Launch Phase 2** — 8 architecture comparison experiments:
-   - 4 × 2D on Longleaf L40S (resnet_2d, unet_2d, swin_2d, vit_2d)
-   - 4 × 3D on Sycamore H100 `h100_sn` (segresnet_3d, swinunetr_3d, unet_3d, resnet_3d)
-   - SegResNet gets `--deep_supervision` too
-   - All train on **48-class datasplit.csv** (the fixed version)
-   - 100 epochs, 1000 iters/epoch (2D) / 500 iters/epoch (3D)
+1. ✅ ~~Check validation results~~ Done — intensity_aug (−23%), crop_weights (−38%), combined (−54%). All hurt. Excluded.
+2. ✅ ~~Check remaining 3D results~~ Done — All 29 3D experiments complete. 3D ablation was non-functional (max Dice 0.017).
+3. ✅ ~~Fix Phase 2 launch~~ Done — EMA enabled, SegResNet on dice_bce+DS, ViT batch=4.
+4. **Monitor Phase 2 training** — 9 jobs running on Longleaf L40S:
+   - 2D first val: ~epoch 10 (~10h), 2D done: ~100h
+   - 3D first val: ~epoch 30 (~48h), 3D done: ~700h (~29 days)
 5. **Run per-class evaluation** on Phase 2 results to determine final model selection
 6. **Final submission preparation** — ensemble, post-processing, test set inference

@@ -1,0 +1,82 @@
+\documentclass[border=12pt,dvipsnames]{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+\definecolor{gold}{HTML}{CFB87C}
+\definecolor{dkblue}{HTML}{156082}
+\definecolor{ltblue}{HTML}{5B9BD5}
+\definecolor{dkgreen}{HTML}{196B24}
+\definecolor{ltgreen}{HTML}{70B87C}
+\definecolor{dkgray}{HTML}{333333}
+\definecolor{medgray}{HTML}{888888}
+
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=16cm,
+    height=12cm,
+    bar width=24pt,
+    ymin=0.40, ymax=0.82,
+    xlabel={\Large\textbf{$(\alpha,\;\beta)$ weights}},
+    xlabel style={font=\large, color=dkgray},
+    ylabel={\Large\textbf{Validation Loss}},
+    ylabel style={font=\large, color=dkgray},
+    title={\LARGE\bfseries\color{dkblue} Sweep B: Tversky $\alpha/\beta$},
+    title style={at={(0.5,1.06)}},
+    xtick=data,
+    symbolic x coords={
+        {(.5,.5)},
+        {(.6,.4)},
+        {(.7,.3)},
+        {(.3,.7)},
+        {(.8,.4)},
+        {(.8,.6)}
+    },
+    xticklabel style={font=\large, color=dkgray},
+    yticklabel style={font=\large, color=medgray},
+    ymajorgrids=true,
+    grid style={gray!15, line width=0.5pt},
+    axis line style={gray!40, line width=0.8pt},
+    tick style={gray!40},
+    nodes near coords,
+    every node near coord/.append style={font=\large\bfseries, color=dkgray, anchor=south, yshift=3pt},
+    point meta=explicit symbolic,
+    clip=false,
+    enlarge x limits=0.14,
+]
+
+\addplot[
+    ybar,
+    fill=ltblue, draw=ltblue!70, line width=0.8pt,
+] coordinates {
+    ({(.5,.5)}, 0.6950) [0.695]
+    ({(.6,.4)}, 0.5614) [0.561]
+    ({(.7,.3)}, 0.6442) [0.644]
+    ({(.3,.7)}, 0.6773) [0.677]
+    ({(.8,.4)}, 0.5712) [0.571]
+    ({(.8,.6)}, 0.7274) [0.727]
+};
+
+% Color overlay for winner bar (.6,.4)
+\fill[dkblue]
+    ([xshift=-12pt]{axis cs:{(.6,.4)}, 0.40}) rectangle ([xshift=12pt]{axis cs:{(.6,.4)}, 0.5614});
+
+% Gold border on winner
+\draw[gold, line width=3.5pt]
+    ([xshift=-14pt]{axis cs:{(.6,.4)}, 0.40}) rectangle ([xshift=14pt]{axis cs:{(.6,.4)}, 0.5614});
+
+% Winner callout
+\node[fill=dkblue!10, draw=dkblue, rounded corners=4pt, line width=1.2pt,
+      font=\large\bfseries, text=dkblue, inner sep=7pt,
+      anchor=north east]
+    at (axis cs:{(.8,.6)}, 0.81)
+    {\raisebox{0pt}{\color{gold}\Large$\bigstar$}\; $\alpha{=}0.6,\;\beta{=}0.4$ is best};
+
+\end{axis}
+\end{tikzpicture}
+\end{document}

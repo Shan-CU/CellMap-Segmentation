@@ -1,0 +1,86 @@
+\documentclass[tikz,border=5pt]{standalone}
+\usepackage[dvipsnames]{xcolor}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds,shadows,decorations.pathreplacing,shapes.geometric}
+
+\definecolor{gold}{HTML}{CFB87C}
+\definecolor{dkgray}{HTML}{333333}
+\definecolor{blue}{HTML}{156082}
+\definecolor{green}{HTML}{196B24}
+\definecolor{ltgray}{HTML}{D9D9D9}
+\definecolor{softblue}{HTML}{D0DEE8}
+\definecolor{softgreen}{HTML}{D4E8D4}
+\definecolor{softgold}{HTML}{E8E0D0}
+\definecolor{verylightgray}{HTML}{F2F2F2}
+
+\begin{document}
+\begin{tikzpicture}[
+    step/.style={
+        rectangle, rounded corners=5pt, minimum width=11cm, minimum height=0.75cm,
+        font=\sffamily\bfseries, text=dkgray, align=left, inner xsep=10pt,
+        drop shadow={shadow xshift=0.5pt, shadow yshift=-0.5pt, opacity=0.10}
+    },
+    num/.style={
+        circle, minimum size=0.6cm, font=\sffamily\bfseries\small, text=white, inner sep=0pt
+    },
+    arr/.style={-{Stealth[length=4pt,width=3.5pt]}, thick, gold},
+    desc/.style={font=\sffamily\small, text=dkgray!70, anchor=west},
+    status/.style={font=\sffamily\small\bfseries, anchor=west},
+]
+
+\def\ysp{-1.15}
+
+% Step 1
+\node[step, fill=softgold] (s1) at (0, 0) {\small Exploratory Round};
+\node[num, fill=gold] at ($(s1.west)+(-0.55,0)$) {1};
+\node[desc] at ($(s1.east)+(0.3,0)$) {5 classes, 13 losses --- form hypotheses};
+\node[status, text=green] at ($(s1.east)+(7.0,0)$) {\checkmark\ Done};
+
+% Step 2
+\node[step, fill=softgold] (s2) at (0, \ysp) {\small Infrastructure Rebuild};
+\node[num, fill=gold] at ($(s2.west)+(-0.55,0)$) {2};
+\node[desc] at ($(s2.east)+(0.3,0)$) {Native zarr pipeline, all 48 classes};
+\node[status, text=green] at ($(s2.east)+(7.0,0)$) {\checkmark\ Done};
+
+% Step 3 (current)
+\node[step, fill=softblue, line width=1.5pt, draw=blue] (s3) at (0, 2*\ysp) {\small\color{blue} Systematic Ablation};
+\node[num, fill=blue] at ($(s3.west)+(-0.55,0)$) {3};
+\node[desc] at ($(s3.east)+(0.3,0)$) {59 experiments, 5 sweeps (2D + 3D)};
+\node[status, text=blue] at ($(s3.east)+(7.0,0)$) {$\leftarrow$ In Progress};
+
+% Step 4
+\node[step, fill=verylightgray] (s4) at (0, 3*\ysp) {\small Compose Optimal Config};
+\node[num, fill=ltgray, text=dkgray] at ($(s4.west)+(-0.55,0)$) {4};
+\node[desc] at ($(s4.east)+(0.3,0)$) {Best of each sweep $\to$ one config};
+
+% Step 5
+\node[step, fill=verylightgray] (s5) at (0, 4*\ysp) {\small Full Architecture Training};
+\node[num, fill=ltgray, text=dkgray] at ($(s5.west)+(-0.55,0)$) {5};
+\node[desc] at ($(s5.east)+(0.3,0)$) {8 architectures $\times$ 100 epochs};
+
+% Step 6
+\node[step, fill=verylightgray] (s6) at (0, 5*\ysp) {\small Threshold Tuning};
+\node[num, fill=ltgray, text=dkgray] at ($(s6.west)+(-0.55,0)$) {6};
+\node[desc] at ($(s6.east)+(0.3,0)$) {Per-class IoU optimization on validation};
+
+% Step 7
+\node[step, fill=verylightgray] (s7) at (0, 6*\ysp) {\small Per-Class Ensemble};
+\node[num, fill=ltgray, text=dkgray] at ($(s7.west)+(-0.55,0)$) {7};
+\node[desc] at ($(s7.east)+(0.3,0)$) {Best architecture per organelle};
+
+% Step 8
+\node[step, fill=softgreen] (s8) at (0, 7*\ysp) {\small Apply to Novel Tomograms};
+\node[num, fill=gold] at ($(s8.west)+(-0.55,0)$) {8};
+\node[desc] at ($(s8.east)+(0.3,0)$) {\textbf{The Goal}};
+
+% Arrows between steps
+\foreach \i/\j in {s1/s2, s2/s3, s3/s4, s4/s5, s5/s6, s6/s7, s7/s8} {
+    \draw[arr] (\i.south) -- (\j.north);
+}
+
+% Highlight bracket for current step
+\begin{scope}[on background layer]
+    \node[fill=softblue, opacity=0.15, rounded corners=7pt, inner sep=6pt, fit=(s3)] {};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}

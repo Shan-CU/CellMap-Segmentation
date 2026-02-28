@@ -66,8 +66,11 @@ def build_swin_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.M
         embed_dim=kwargs.get("embed_dim", 96),
         depths=kwargs.get("depths", [2, 2, 6, 2]),
         num_heads=kwargs.get("num_heads", [3, 6, 12, 24]),
-        window_size=kwargs.get("window_size", [7, 7]),
+        window_size=kwargs.get("window_size", [8, 8]),  # 8 aligns with 256→64→32→16→8
         num_classes=num_classes,
+        dropout=kwargs.get("dropout", 0.1),
+        attention_dropout=kwargs.get("attention_dropout", 0.1),
+        stochastic_depth_prob=kwargs.get("stochastic_depth_prob", 0.2),
     )
 
 
