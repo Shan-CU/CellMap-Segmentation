@@ -21,6 +21,7 @@ import argparse
 import gc
 import io
 import json
+import logging
 import os
 import random
 import resource
@@ -28,6 +29,14 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
+
+# Configure root logger so cellmap_data INFO messages (e.g. TensorStore
+# cache bounding) are visible in stderr.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(name)s %(levelname)s: %(message)s",
+    stream=sys.stderr,
+)
 
 import numpy as np
 import torch
@@ -532,6 +541,46 @@ def train(args: argparse.Namespace) -> None:
         pass  # Already initialized at declaration
     # (If checkpoint restored values, they are already set)
 
+    # --- Helper: clear accumulated TensorStore handles from dataset images ---
+    # CellMapImage._ts_store is a cached_property that opens a TensorStore
+    # handle the first time the image is read. Once opened, the handle
+    # persists for the lifetime of the CellMapImage instance. With 199
+    # datasets × ~49 images each, this accumulates ~9,751 handles that each
+    # hold C++ TensorStore internal state (chunk data, open file descriptors).
+    # Combined with xarray reindex materializing full source arrays through
+    # the handle, RSS grows ~5.6 GB/step. Clearing _ts_store after each
+    # step forces re-open on next access (cheap: ~50ms) but prevents the
+    # C++ state from accumulating across the full training run.
+    def _clear_ts_handles(dataset):
+        """Clear _ts_store cached_property from all CellMapImage objects."""
+        from cellmap_data import CellMapImage
+        try:
+            datasets = dataset.datasets  # CellMapMultiDataset.datasets
+        except AttributeError:
+            datasets = [dataset]
+        for ds in datasets:
+            # Clear input sources
+            for src in getattr(ds, 'input_sources', {}).values():
+                if isinstance(src, CellMapImage):
+                    if '_ts_store' in src.__dict__:
+                        del src.__dict__['_ts_store']
+                    if 'array' in src.__dict__:
+                        del src.__dict__['array']
+            # Clear target sources (dict of class→CellMapImage)
+            for target_dict in getattr(ds, 'target_sources', {}).values():
+                if isinstance(target_dict, dict):
+                    for src in target_dict.values():
+                        if isinstance(src, CellMapImage):
+                            if '_ts_store' in src.__dict__:
+                                del src.__dict__['_ts_store']
+                            if 'array' in src.__dict__:
+                                del src.__dict__['array']
+                elif isinstance(target_dict, CellMapImage):
+                    if '_ts_store' in target_dict.__dict__:
+                        del target_dict.__dict__['_ts_store']
+                    if 'array' in target_dict.__dict__:
+                        del target_dict.__dict__['array']
+
     # --- Memory debugging (mirrors upstream CSC train.py debug_memory feature) ---
     debug_memory = args.debug_memory
     memory_log_steps = int(os.environ.get("MEMORY_LOG_STEPS", "100"))
@@ -545,13 +594,14 @@ def train(args: argparse.Namespace) -> None:
             objgraph = None
         if main_process:
             rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KB→MB on Linux
-            print(f"\n[mem-debug] Baseline before training loop:")
-            print(f"[mem-debug]   RSS = {rss_mb:.0f} MB")
+            print(f"\n[mem-debug] Baseline before training loop:", flush=True)
+            print(f"[mem-debug]   RSS = {rss_mb:.0f} MB", flush=True)
+            print(f"[mem-debug]   RSS = {rss_mb:.0f} MB", file=sys.stderr, flush=True)
             if objgraph is not None:
                 # Establish baseline — capture current object counts
                 objgraph.show_growth(limit=5, file=io.StringIO())  # prime baseline
-                print(f"[mem-debug]   objgraph baseline primed ({memory_log_steps}-step interval)")
-            print()
+                print(f"[mem-debug]   objgraph baseline primed ({memory_log_steps}-step interval)", flush=True)
+            print(flush=True)
     else:
         objgraph = None  # ensure defined for later checks
 
@@ -659,16 +709,32 @@ def train(args: argparse.Namespace) -> None:
                 writer.add_scalar("train/loss", loss_val, n_iter)
 
             # Periodic memory monitoring & GPU cache clear
-            if step > 0 and step % memory_log_steps == 0:
+            if step % max(1, memory_log_steps) == 0:
                 if debug_memory and main_process:
-                    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                    # Read CURRENT (not peak) RSS from /proc
+                    try:
+                        with open("/proc/self/status") as _pf:
+                            for _line in _pf:
+                                if _line.startswith("VmRSS:"):
+                                    cur_rss_mb = int(_line.split()[1]) / 1024  # kB→MB
+                                    break
+                            else:
+                                cur_rss_mb = peak_mb
+                    except OSError:
+                        cur_rss_mb = peak_mb
                     gpu_mb = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0
-                    print(f"[mem-debug] iter={n_iter} (ep{epoch+1} step{step}) "
-                          f"RSS={rss_mb:.0f}MB  GPU_peak={gpu_mb:.0f}MB")
+                    msg = (f"[mem-debug] iter={n_iter} (ep{epoch+1} step{step}) "
+                           f"CurRSS={cur_rss_mb:.0f}MB  PeakRSS={peak_mb:.0f}MB  GPU_peak={gpu_mb:.0f}MB")
+                    print(msg, flush=True)
+                    print(msg, file=sys.stderr, flush=True)
                     if objgraph is not None:
                         objgraph.show_growth(limit=5)
-                    writer.add_scalar("mem/rss_mb", rss_mb, n_iter)
+                    writer.add_scalar("mem/rss_cur_mb", cur_rss_mb, n_iter)
+                    writer.add_scalar("mem/rss_peak_mb", peak_mb, n_iter)
                     writer.add_scalar("mem/gpu_peak_mb", gpu_mb, n_iter)
+                # Clear accumulated TensorStore handles to prevent RSS growth
+                _clear_ts_handles(train_loader.dataset)
                 gc.collect()
                 torch.cuda.empty_cache()
 
