@@ -152,12 +152,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--device", type=str, default=None)
 
-    # Memory management (for 3D training OOM prevention)
+    # Memory management
     parser.add_argument("--persistent_workers", type=str, default="auto",
                         choices=["true", "false", "auto"],
-                        help="DataLoader persistent_workers. 'auto' = PyTorch default "
-                             "(True when num_workers>0). Set 'false' to prevent host RAM "
-                             "leak from CellMapDataLoader.refresh() keeping old workers alive.")
+                        help="DataLoader persistent_workers. 'auto' = disable for 3D "
+                             "(reduces fork overhead), enable for 2D. TensorStore cache "
+                             "bounding is handled by cellmap-data (default 2 GiB, or "
+                             "CELLMAP_TENSORSTORE_CACHE_BYTES env var).")
 
     args = parser.parse_args()
 
@@ -316,17 +317,10 @@ def train(args: argparse.Namespace) -> None:
     extra_dl_kwargs = {}
 
     # Memory management: TensorStore cache bounding
-    # Each CellMapImage calls ts.open(context=None), which creates an
-    # independent UNBOUNDED chunk cache per array. With 261 datasets ×
-    # ~49 arrays each = ~12,789 caches that grow without eviction,
-    # consuming 400+ GB within one epoch. Fix: create a single shared
-    # ts.Context with a bounded cache pool and pass to CellMapDataSplit.
-    import tensorstore as ts
-    cache_bytes = args.ts_cache_mb * 1024 * 1024
-    ts_context = ts.Context({"cache_pool": {"total_bytes_limit": cache_bytes}})
-    extra_dl_kwargs["context"] = ts_context
-    if main_process:
-        print(f"TensorStore shared cache pool: {args.ts_cache_mb} MB")
+    # cellmap-data >= 2026.2.27 has built-in tensorstore_cache_bytes on
+    # CellMapDataLoader (default 2 GiB). It also reads the env var
+    # CELLMAP_TENSORSTORE_CACHE_BYTES. Our 3D sbatch sets it to 512 MiB.
+    # No manual ts.Context needed — the library handles it properly.
 
     # persistent_workers control
     if args.persistent_workers != "auto":

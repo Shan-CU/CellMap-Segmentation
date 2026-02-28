@@ -351,7 +351,8 @@ class PartialAnnotationDeepSupervisionLoss(nn.Module):
                         fg.float(), size=pred.shape[2:], mode="nearest"
                     ) > 0.5
 
-                self.base_loss.set_annotation_mask(self._annotation_mask)
+                if hasattr(self.base_loss, 'set_annotation_mask'):
+                    self.base_loss.set_annotation_mask(self._annotation_mask)
                 if hasattr(self.base_loss, 'set_foreground_mask'):
                     self.base_loss.set_foreground_mask(fg)
                 total_loss = total_loss + w * self.base_loss(pred, t)
@@ -361,7 +362,8 @@ class PartialAnnotationDeepSupervisionLoss(nn.Module):
             self._foreground_mask = None
             return total_loss / max(total_weight, 1e-8)
         else:
-            self.base_loss.set_annotation_mask(self._annotation_mask)
+            if hasattr(self.base_loss, 'set_annotation_mask'):
+                self.base_loss.set_annotation_mask(self._annotation_mask)
             if hasattr(self.base_loss, 'set_foreground_mask'):
                 self.base_loss.set_foreground_mask(self._foreground_mask)
             self._annotation_mask = None

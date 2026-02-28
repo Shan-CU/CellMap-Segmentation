@@ -74,10 +74,11 @@ def build_swin_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.M
 @register_model("vit_2d", ndim=2, description="CSC ViTVNet 2D (~105M params)")
 def build_vit_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Module:
     from cellmap_segmentation_challenge.models import ViTVNet2D, get_vit_config_2d
-    config = get_vit_config_2d(
-        img_size=kwargs.get("img_size", 256),
-        num_classes=num_classes,
-    )
+    config = get_vit_config_2d("base")
+    config["img_size"] = kwargs.get("img_size", 256)
+    # Keep default patch_size=16 — Embeddings2D divides by down_factor(2) internally
+    # so actual patch conv is 8×8 on the 64×64 CNN output → 64 tokens
+    # (Previous bug: setting patch_size=64 created a 32×32 conv → 201M params, OOM)
     return ViTVNet2D(config=config, in_channels=in_channels, num_classes=num_classes)
 
 
@@ -106,13 +107,15 @@ def build_swinunetr_3d(
     num_classes: int = 35, in_channels: int = 1, **kwargs
 ) -> nn.Module:
     from monai.networks.nets import SwinUNETR
+    # img_size was removed in MONAI >= 1.5; pop it so it doesn't get forwarded
+    kwargs.pop("img_size", None)
     return SwinUNETR(
-        img_size=kwargs.get("img_size", (128, 128, 128)),
         in_channels=in_channels,
         out_channels=num_classes,
         feature_size=kwargs.get("feature_size", 48),
         drop_rate=kwargs.get("drop_rate", 0.0),
         attn_drop_rate=kwargs.get("attn_drop_rate", 0.0),
+        spatial_dims=3,
     )
 
 
@@ -128,11 +131,11 @@ def build_resnet_3d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn
     return ResNet(ndims=3, input_nc=in_channels, output_nc=num_classes)
 
 
-@register_model("vitnet_3d", ndim=3, description="CSC ViTVNet 3D")
+@register_model("vitnet_3d", ndim=3, description="CSC ViTVNet 3D (~28M params)")
 def build_vitnet_3d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Module:
     from cellmap_segmentation_challenge.models import ViTVNet
     return ViTVNet(
-        num_classes=num_classes,
+        out_channels=num_classes,
         img_size=kwargs.get("img_size", (128, 128, 128)),
     )
 

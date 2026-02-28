@@ -1,43 +1,49 @@
 #!/bin/bash
-#SBATCH --partition=l40-gpu
+#SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=768G
+#SBATCH --mem=256G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/%x_%j.out
 #SBATCH --error=runs/ablation/logs/%x_%j.err
 
 # ============================================================================
-# Phase 2: 3D training on Longleaf L40S (single GPU, batch=2)
+# Phase 2: 2D training on A100 80GB (single GPU)
 # ============================================================================
-# Fallback for when A100 is unavailable. Most 3D models (20-60M params)
-# fit in L40S 48GB VRAM at batch=2 with AMP.
-# batch=2 is the nnU-Net default — works fine with BatchNorm.
-# UNet_3D (90M) may be tight; monitor first epoch for OOM.
+# For models too large for L40S 48GB (e.g., ViT 2D at 293M params).
+# Uses 1 GPU to leave 7 remaining for 3D DDP jobs.
+# Node: g180701 — 8× A100 SXM4 80GB, NVLink, 1TB RAM
+#
+# Resource budget (minimal footprint):
+#   - 1 GPU  (leaves 7 for 3D)
+#   - 8 CPUs (leaves 120+ for 3D)
+#   - 96G RAM (leaves 900G+ for 3D)
 # ============================================================================
 
 set -euo pipefail
 
 EXPERIMENT_NAME="${EXPERIMENT_NAME:?Must set EXPERIMENT_NAME}"
-MODEL_NAME="${MODEL_NAME:-segresnet_3d}"
+MODEL_NAME="${MODEL_NAME:-vit_2d}"
 LOSS_NAME="${LOSS_NAME:?Must set LOSS_NAME}"
 LOSS_KWARGS="${LOSS_KWARGS:-}"
 USE_FG_MASK="${USE_FG_MASK:-true}"
-BATCH_SIZE="${BATCH_SIZE:-2}"
-EPOCHS="${EPOCHS:-1000}"
-ITERS="${ITERS:-300}"
+BATCH_SIZE="${BATCH_SIZE:-8}"
+EPOCHS="${EPOCHS:-100}"
+ITERS="${ITERS:-1000}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 echo "============================================"
-echo "Phase 2 (L40S 3D): ${EXPERIMENT_NAME}"
+echo "Phase 2 (A100 2D): ${EXPERIMENT_NAME}"
 echo "Model: ${MODEL_NAME} | Loss: ${LOSS_NAME}"
-echo "Cluster: Longleaf | Partition: l40-gpu"
+echo "Cluster: Longleaf | Partition: a100-multi-gpu"
 echo "Node: $(hostname) | GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
-echo "Batch: ${BATCH_SIZE} (single GPU)"
 echo "============================================"
 
+# Longleaf micromamba setup
 export MAMBA_EXE='/nas/longleaf/home/gsgeorge/.local/bin/micromamba'
 export MAMBA_ROOT_PREFIX='/nas/longleaf/home/gsgeorge/micromamba'
 eval "$("$MAMBA_EXE" shell hook --shell bash --root-prefix "$MAMBA_ROOT_PREFIX" 2>/dev/null)"
@@ -46,33 +52,23 @@ micromamba activate csc
 cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 mkdir -p runs/ablation/logs
 
-# TensorStore cache bounding (prevents host-RAM OOM):
-# cellmap-data >= 2026.2.27 bounds TensorStore chunk caches to 2 GiB by
-# default via CellMapDataLoader.tensorstore_cache_bytes. Without bounding,
-# each CellMapImage opens an independent UNBOUNDED cache — with ~12k arrays
-# across 261 datasets this exceeds 400 GB in a single epoch.
-# Override to 512 MiB for 3D to stay conservative on shared L40S nodes.
-export CELLMAP_TENSORSTORE_CACHE_BYTES=$((512 * 1024 * 1024))
-
 CMD="python -m training.train \
     --experiment_name ${EXPERIMENT_NAME} \
     --run_dir runs/ablation \
     --model ${MODEL_NAME} \
     --loss ${LOSS_NAME} \
     --batch_size ${BATCH_SIZE} \
-    --input_shape 128 128 128 \
+    --input_shape 1 256 256 \
     --input_scale 8 8 8 \
     --epochs ${EPOCHS} \
     --iterations_per_epoch ${ITERS} \
     --learning_rate 1e-4 \
     --max_grad_norm 1.0 \
     --scheduler cosine \
-    --warmup_epochs 34 \
+    --warmup_epochs 10 \
     --validation_time_limit 600 \
-    --val_every_n_epochs 30 \
-    --best_metric val_dice \
-    --num_workers 4 \
-    --persistent_workers false \
+    --val_every_n_epochs 10 \
+    --num_workers 8 \
     --amp"
 
 if [ "${USE_FG_MASK}" = "false" ]; then

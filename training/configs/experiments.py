@@ -404,12 +404,23 @@ VALIDATION_DATA_LOADING = [
 # ============================================================================
 
 def make_arch_comparison_2d(
-    loss: str = "balanced_softmax_tversky",
+    loss: str = "dice_bce",
     loss_kwargs: dict = None,
     use_foreground_mask: bool = True,
+    ema: bool = True,
+    ema_decay: float = 0.999,
     epochs: int = 100,
 ) -> list[ExperimentConfig]:
-    """Generate architecture comparison configs for 2D models."""
+    """Generate architecture comparison configs for 2D models.
+
+    Phase 2 recipe (from Phase 1 ablation):
+      - Loss: dice_bce (BCE > Dice+BCE >> everything else)
+      - EMA: enabled (4x val_loss improvement)
+      - FG mask: enabled (default for all top performers)
+      - Weighted sampler: enabled (−37% without)
+      - Intensity aug: DISABLED (hurt −23%)
+      - Class-aware crop: DISABLED (hurt −38%)
+    """
     loss_kwargs = loss_kwargs or {}
     models = ["resnet_2d", "unet_2d", "swin_2d", "vit_2d"]
     return [
@@ -417,6 +428,8 @@ def make_arch_comparison_2d(
             experiment_name=f"arch_2d_{m.replace('_2d', '')}",
             model=m, loss=loss, loss_kwargs=loss_kwargs,
             use_foreground_mask=use_foreground_mask,
+            ema=ema,
+            ema_decay=ema_decay,
             epochs=epochs,
             iterations_per_epoch=1000,
             val_every_n_epochs=5,
@@ -426,19 +439,32 @@ def make_arch_comparison_2d(
 
 
 def make_arch_comparison_3d(
-    loss: str = "balanced_softmax_tversky",
+    loss: str = "dice_bce",
     loss_kwargs: dict = None,
     use_foreground_mask: bool = True,
+    ema: bool = True,
+    ema_decay: float = 0.999,
     epochs: int = 100,
 ) -> list[ExperimentConfig]:
-    """Generate architecture comparison configs for 3D models."""
+    """Generate architecture comparison configs for 3D models.
+
+    Phase 2 recipe (from Phase 1 ablation — transferred from 2D):
+      - Loss: dice_bce
+      - EMA: enabled
+      - FG mask: enabled
+      - Deep supervision: SegResNet only (architecturally supported)
+      - 5 models: segresnet, swinunetr, unet, resnet, vitnet
+    """
     loss_kwargs = loss_kwargs or {}
-    models = ["segresnet_3d", "swinunetr_3d", "unet_3d", "resnet_3d"]
-    return [
-        ExperimentConfig(
+    models = ["segresnet_3d", "swinunetr_3d", "unet_3d", "resnet_3d", "vitnet_3d"]
+    configs = []
+    for m in models:
+        cfg = ExperimentConfig(
             experiment_name=f"arch_3d_{m.replace('_3d', '')}",
             model=m, loss=loss, loss_kwargs=loss_kwargs,
             use_foreground_mask=use_foreground_mask,
+            ema=ema,
+            ema_decay=ema_decay,
             batch_size=2,
             input_shape=[128, 128, 128],
             input_scale=[8, 8, 8],
@@ -447,8 +473,14 @@ def make_arch_comparison_3d(
             val_every_n_epochs=5,
             validation_time_limit=180,
         )
-        for m in models
-    ]
+        # Enable deep supervision for SegResNet (architecturally supported)
+        if m == "segresnet_3d":
+            cfg.deep_supervision = True
+        # vitnet_3d needs batch_size=1 (global attention is very memory intensive)
+        if m == "vitnet_3d":
+            cfg.batch_size = 1
+        configs.append(cfg)
+    return configs
 
 
 # ============================================================================
