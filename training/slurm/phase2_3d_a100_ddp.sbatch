@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:2
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=768G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/%x_%j.out
 #SBATCH --error=runs/ablation/logs/%x_%j.err
@@ -58,11 +58,9 @@ micromamba activate csc
 cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 mkdir -p runs/ablation/logs
 
-# Prevent host-RAM OOM from CellMapDataLoader.refresh() memory leak:
-# refresh() recreates the PyTorch DataLoader each epoch. With
-# persistent_workers=True (default), old worker processes stay alive and
-# accumulate TensorStore chunk cache. Fix: --persistent_workers false.
-export CELLMAP_TENSORSTORE_CACHE_BYTES=$((512 * 1024 * 1024))
+# TensorStore cache bounding:
+# cellmap-data >= 2026.2.27 bounds TensorStore chunk caches to 2 GiB by
+# default. No override needed. persistent_workers is safe with bounded cache.
 
 # NCCL optimizations for NVLink (A100 SXM4 has NVLink)
 export NCCL_P2P_LEVEL=NVL
@@ -89,8 +87,7 @@ CMD="torchrun \
     --validation_time_limit 600 \
     --val_every_n_epochs 30 \
     --best_metric val_dice \
-    --num_workers 4 \
-    --persistent_workers false \
+    --num_workers 8 \
     --amp"
 
 if [ "${USE_FG_MASK}" = "false" ]; then

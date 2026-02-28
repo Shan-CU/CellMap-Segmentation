@@ -3,8 +3,8 @@
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=768G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/%x_%j.out
 #SBATCH --error=runs/ablation/logs/%x_%j.err
@@ -12,10 +12,9 @@
 # ============================================================================
 # Phase 2: 3D training on Longleaf L40S (single GPU, batch=2)
 # ============================================================================
-# Fallback for when A100 is unavailable. Most 3D models (20-60M params)
-# fit in L40S 48GB VRAM at batch=2 with AMP.
+# Most 3D models (20-90M params) fit in L40S 48GB VRAM at batch=2 with AMP.
 # batch=2 is the nnU-Net default — works fine with BatchNorm.
-# UNet_3D (90M) may be tight; monitor first epoch for OOM.
+# RAM: 128G is ample — cellmap-data bounds TensorStore cache to 2 GiB.
 # ============================================================================
 
 set -euo pipefail
@@ -46,13 +45,9 @@ micromamba activate csc
 cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 mkdir -p runs/ablation/logs
 
-# TensorStore cache bounding (prevents host-RAM OOM):
+# TensorStore cache bounding:
 # cellmap-data >= 2026.2.27 bounds TensorStore chunk caches to 2 GiB by
-# default via CellMapDataLoader.tensorstore_cache_bytes. Without bounding,
-# each CellMapImage opens an independent UNBOUNDED cache — with ~12k arrays
-# across 261 datasets this exceeds 400 GB in a single epoch.
-# Override to 512 MiB for 3D to stay conservative on shared L40S nodes.
-export CELLMAP_TENSORSTORE_CACHE_BYTES=$((512 * 1024 * 1024))
+# default. No override needed. persistent_workers is safe with bounded cache.
 
 CMD="python -m training.train \
     --experiment_name ${EXPERIMENT_NAME} \
@@ -71,8 +66,7 @@ CMD="python -m training.train \
     --validation_time_limit 600 \
     --val_every_n_epochs 30 \
     --best_metric val_dice \
-    --num_workers 4 \
-    --persistent_workers false \
+    --num_workers 8 \
     --amp"
 
 if [ "${USE_FG_MASK}" = "false" ]; then

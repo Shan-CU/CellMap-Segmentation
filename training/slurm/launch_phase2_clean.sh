@@ -47,9 +47,9 @@ echo "============================================"
 echo ""
 
 # ============================================================================
-# 3D MODELS (submitted first to monitor OOM fix)
+# 3D MODELS
 # L40S single GPU, batch=2, 128³ patches, 1000ep × 300it
-# persistent_workers=false to prevent refresh() memory leak
+# TensorStore cache bounded at 2 GiB by cellmap-data (no OOM risk)
 # ============================================================================
 if $LAUNCH_3D; then
     echo "--- 3D Models (L40S, single GPU, batch=2) ---"

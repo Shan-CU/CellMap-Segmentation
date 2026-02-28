@@ -18,9 +18,12 @@ Or via SLURM:
 from __future__ import annotations
 
 import argparse
+import gc
+import io
 import json
 import os
 import random
+import resource
 import sys
 import time
 from pathlib import Path
@@ -155,10 +158,13 @@ def parse_args() -> argparse.Namespace:
     # Memory management
     parser.add_argument("--persistent_workers", type=str, default="auto",
                         choices=["true", "false", "auto"],
-                        help="DataLoader persistent_workers. 'auto' = disable for 3D "
-                             "(reduces fork overhead), enable for 2D. TensorStore cache "
-                             "bounding is handled by cellmap-data (default 2 GiB, or "
-                             "CELLMAP_TENSORSTORE_CACHE_BYTES env var).")
+                        help="DataLoader persistent_workers. 'auto' = use PyTorch default. "
+                             "Safe for both 2D and 3D now that cellmap-data bounds "
+                             "TensorStore cache (default 2 GiB).")
+    parser.add_argument("--debug_memory", action="store_true", default=False,
+                        help="Enable memory debugging: log RSS and Python object growth "
+                             "via objgraph every MEMORY_LOG_STEPS iterations (env var, "
+                             "default 100). Requires 'pip install objgraph'.")
 
     args = parser.parse_args()
 
@@ -319,20 +325,15 @@ def train(args: argparse.Namespace) -> None:
     # Memory management: TensorStore cache bounding
     # cellmap-data >= 2026.2.27 has built-in tensorstore_cache_bytes on
     # CellMapDataLoader (default 2 GiB). It also reads the env var
-    # CELLMAP_TENSORSTORE_CACHE_BYTES. Our 3D sbatch sets it to 512 MiB.
-    # No manual ts.Context needed — the library handles it properly.
+    # CELLMAP_TENSORSTORE_CACHE_BYTES. No manual ts.Context needed.
 
-    # persistent_workers control
+    # persistent_workers control — safe for both 2D and 3D now that
+    # TensorStore cache is bounded (no unbounded memory accumulation).
     if args.persistent_workers != "auto":
         extra_dl_kwargs["persistent_workers"] = (args.persistent_workers == "true")
         if main_process:
             print(f"DataLoader persistent_workers={extra_dl_kwargs['persistent_workers']}")
-    else:
-        # Default: disable persistent workers for 3D to avoid fork overhead
-        if is_3d:
-            extra_dl_kwargs["persistent_workers"] = False
-            if main_process:
-                print("DataLoader persistent_workers=False (auto, 3D mode)")
+    # auto: let PyTorch DataLoader default (True when num_workers>0)
 
     if args.intensity_aug:
         from training.transforms.intensity import IntensityAugmentation
@@ -531,6 +532,29 @@ def train(args: argparse.Namespace) -> None:
         pass  # Already initialized at declaration
     # (If checkpoint restored values, they are already set)
 
+    # --- Memory debugging (mirrors upstream CSC train.py debug_memory feature) ---
+    debug_memory = args.debug_memory
+    memory_log_steps = int(os.environ.get("MEMORY_LOG_STEPS", "100"))
+    if debug_memory:
+        try:
+            import objgraph
+        except ImportError:
+            if main_process:
+                print("WARNING: objgraph not installed. Install with 'pip install objgraph' "
+                      "to enable full memory debugging. Falling back to RSS-only.")
+            objgraph = None
+        if main_process:
+            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KB→MB on Linux
+            print(f"\n[mem-debug] Baseline before training loop:")
+            print(f"[mem-debug]   RSS = {rss_mb:.0f} MB")
+            if objgraph is not None:
+                # Establish baseline — capture current object counts
+                objgraph.show_growth(limit=5, file=io.StringIO())  # prime baseline
+                print(f"[mem-debug]   objgraph baseline primed ({memory_log_steps}-step interval)")
+            print()
+    else:
+        objgraph = None  # ensure defined for later checks
+
     for epoch in range(start_epoch, args.epochs):
         model.train()
         if hasattr(loss_fn, 'train'):
@@ -633,6 +657,20 @@ def train(args: argparse.Namespace) -> None:
                     "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
                 })
                 writer.add_scalar("train/loss", loss_val, n_iter)
+
+            # Periodic memory monitoring & GPU cache clear
+            if step > 0 and step % memory_log_steps == 0:
+                if debug_memory and main_process:
+                    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                    gpu_mb = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0
+                    print(f"[mem-debug] iter={n_iter} (ep{epoch+1} step{step}) "
+                          f"RSS={rss_mb:.0f}MB  GPU_peak={gpu_mb:.0f}MB")
+                    if objgraph is not None:
+                        objgraph.show_growth(limit=5)
+                    writer.add_scalar("mem/rss_mb", rss_mb, n_iter)
+                    writer.add_scalar("mem/gpu_peak_mb", gpu_mb, n_iter)
+                gc.collect()
+                torch.cuda.empty_cache()
 
         avg_train_loss = epoch_loss / args.iterations_per_epoch
         # Reduce train loss across ranks for accurate logging

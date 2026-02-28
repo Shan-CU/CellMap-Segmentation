@@ -98,13 +98,11 @@ TensorStore evicts the least-recently-used chunks automatically.
 
 | Setting | 2D jobs | 3D jobs |
 |---------|---------|---------|
-| `CELLMAP_TENSORSTORE_CACHE_BYTES` | *(not set → 2 GiB default)* | `512 MiB` (via sbatch `export`) |
-| `--persistent_workers` | `auto` → enabled | `auto` → disabled |
-| Expected peak RSS | ~50–100 GB | ~30–60 GB |
+| `CELLMAP_TENSORSTORE_CACHE_BYTES` | *(not set → 2 GiB default)* | *(not set → 2 GiB default)* |
+| `--persistent_workers` | `auto` (PyTorch default) | `auto` (PyTorch default) |
+| `--mem` (SLURM) | 64G | 128G |
 
-The 3D sbatch overrides to 512 MiB because 3D jobs run on shared L40S nodes
-with lower memory allocations and the 128³ chunk access pattern benefits less
-from large caches than 2D's 256×256 slices.
+The 2 GiB default is ample for both 2D and 3D. No env var override needed.
 
 ---
 

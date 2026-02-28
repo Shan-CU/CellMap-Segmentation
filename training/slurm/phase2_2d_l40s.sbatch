@@ -4,7 +4,7 @@
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=384G
+#SBATCH --mem=64G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/%x_%j.out
 #SBATCH --error=runs/ablation/logs/%x_%j.err
