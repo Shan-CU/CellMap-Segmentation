@@ -284,9 +284,11 @@ def train(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir) / args.experiment_name
     ckpt_dir = run_dir / "checkpoints"
     log_dir = run_dir / "tensorboard"
+    val_img_dir = run_dir / "val_images"
     if main_process:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         log_dir.mkdir(parents=True, exist_ok=True)
+        val_img_dir.mkdir(parents=True, exist_ok=True)
 
         # Save config
         config_path = run_dir / "config.json"
@@ -776,6 +778,9 @@ def train(args: argparse.Namespace) -> None:
             val_loader.refresh()
             torch.cuda.empty_cache()
 
+            # Capture first batch for visualization (rank 0 only)
+            vis_sample = None  # Will hold (input, pred, gt) for first sample
+
             with torch.no_grad():
                 for batch in val_loader.loader:
                     inputs = batch[input_keys[0]].to(device)
@@ -830,6 +835,14 @@ def train(args: argparse.Namespace) -> None:
                     dice_fp += (preds * (1 - gt) * valid).sum(dim=(0, *spatial_dims))
                     dice_fn += ((1 - preds) * gt * valid).sum(dim=(0, *spatial_dims))
 
+                    # Capture first batch's first sample for visualization
+                    if vis_sample is None and main_process:
+                        vis_sample = (
+                            inputs[0].detach().cpu(),         # (1, *spatial) or (1, D, H, W)
+                            preds[0].detach().cpu(),          # (C, *spatial)
+                            gt[0].detach().cpu(),             # (C, *spatial)
+                        )
+
                     if time.time() - val_start > args.validation_time_limit:
                         break
 
@@ -881,6 +894,86 @@ def train(args: argparse.Namespace) -> None:
                     )
                     print(f"    Top-5: {top_str}")
                     print(f"    Bot-5: {bot_str}")
+
+                # --- Log validation segmentation images to TensorBoard ---
+                if vis_sample is not None:
+                    try:
+                        vis_input, vis_pred, vis_gt = vis_sample  # (1,*sp), (C,*sp), (C,*sp)
+                        is_3d = vis_input.ndim == 4  # (1, D, H, W)
+
+                        # For 3D: take center slice along depth axis
+                        if is_3d:
+                            mid = vis_input.shape[1] // 2
+                            vis_input = vis_input[:, mid, :, :]   # (1, H, W)
+                            vis_pred = vis_pred[:, mid, :, :]     # (C, H, W)
+                            vis_gt = vis_gt[:, mid, :, :]         # (C, H, W)
+
+                        # Log raw EM input image
+                        img_hw = vis_input[0]  # (H, W)
+                        # Normalize to [0,1]
+                        img_min, img_max = img_hw.min(), img_hw.max()
+                        if img_max > img_min:
+                            img_hw = (img_hw - img_min) / (img_max - img_min)
+                        writer.add_image("val_vis/input", img_hw.unsqueeze(0), epoch + 1)  # (1, H, W)
+
+                        # Log per-class pred vs GT for classes with any GT or pred
+                        # Pick top-6 most active classes (by GT voxel count) for compact viz
+                        gt_counts = vis_gt.sum(dim=(-2, -1))  # (C,)
+                        pred_counts = vis_pred.sum(dim=(-2, -1))  # (C,)
+                        activity = gt_counts + pred_counts
+                        n_show = min(6, num_classes)
+                        top_classes = activity.argsort(descending=True)[:n_show]
+
+                        for ci in top_classes:
+                            ci = ci.item()
+                            if activity[ci] == 0:
+                                continue
+                            cname = classes[ci]
+                            # 3-channel overlay: R=pred-only(FP), G=overlap(TP), B=gt-only(FN)
+                            p = vis_pred[ci]   # (H, W) binary
+                            g = vis_gt[ci]     # (H, W) binary
+                            tp = p * g
+                            fp = p * (1 - g)
+                            fn = (1 - p) * g
+                            overlay = torch.stack([fp + tp * 0.5, tp, fn + tp * 0.5], dim=0)  # (3, H, W)
+                            overlay = overlay.clamp(0, 1)
+                            writer.add_image(f"val_seg/{cname}", overlay, epoch + 1)
+
+                        # Also save a composite: all-class overlay on the EM image
+                        # Union of all predictions in magenta, all GT in green
+                        all_pred = vis_pred.any(dim=0).float()  # (H, W)
+                        all_gt = vis_gt.any(dim=0).float()      # (H, W)
+                        composite = torch.stack([
+                            img_hw * 0.6 + all_pred * 0.4,   # R: EM + pred
+                            img_hw * 0.6 + all_gt * 0.4,     # G: EM + GT
+                            img_hw * 0.6,                     # B: EM only
+                        ], dim=0).clamp(0, 1)  # (3, H, W)
+                        writer.add_image("val_vis/composite", composite, epoch + 1)
+
+                        # --- Also save to disk as PNG ---
+                        try:
+                            from torchvision.utils import save_image
+                            ep_dir = val_img_dir / f"epoch_{epoch+1:04d}"
+                            ep_dir.mkdir(exist_ok=True)
+                            save_image(img_hw.unsqueeze(0), ep_dir / "input.png")
+                            save_image(composite, ep_dir / "composite.png")
+                            for ci in top_classes:
+                                ci = ci.item()
+                                if activity[ci] == 0:
+                                    continue
+                                cname = classes[ci]
+                                p = vis_pred[ci]
+                                g = vis_gt[ci]
+                                tp = p * g
+                                fp = p * (1 - g)
+                                fn = (1 - p) * g
+                                overlay = torch.stack([fp + tp * 0.5, tp, fn + tp * 0.5], dim=0).clamp(0, 1)
+                                save_image(overlay, ep_dir / f"{cname}.png")
+                        except Exception as e2:
+                            print(f"  [warn] Failed to save val images to disk: {e2}")
+
+                    except Exception as e:
+                        print(f"  [warn] Failed to log val images: {e}")
 
                 # Save best model (EMA if available, else regular unwrapped)
                 is_new_best = False
