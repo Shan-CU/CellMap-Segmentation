@@ -4,7 +4,7 @@
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --mem=384G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/%x_%j.out
 #SBATCH --error=runs/ablation/logs/%x_%j.err
@@ -14,7 +14,8 @@
 # ============================================================================
 # Most 3D models (20-90M params) fit in L40S 48GB VRAM at batch=2 with AMP.
 # batch=2 is the nnU-Net default — works fine with BatchNorm.
-# RAM: 128G is ample — cellmap-data bounds TensorStore cache to 2 GiB.
+# RAM: 384G — canary measured 283G peak (main + 8 forked workers).
+# TensorStore cache bounded at 2 GiB by cellmap-data.
 # ============================================================================
 
 set -euo pipefail
