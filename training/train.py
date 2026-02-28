@@ -378,6 +378,23 @@ def train(args: argparse.Namespace) -> None:
     # Replace sampler with class-aware version if requested
     if args.class_aware_sampling:
         from training.samplers.crop_weights import make_class_aware_sampler
+
+    # --- Monkey-patch CellMapImage._clear_array_cache to also clear _current_coords ---
+    # PR #64 (cellmap-data 2026.2.28.30) clears the xarray array cache in
+    # __getitem__'s finally block, but _current_coords (128³×3 float64 meshgrid,
+    # ~48 MB) is still set in apply_spatial_transforms() and never cleared.
+    # This patch makes the cleanup happen automatically in every __getitem__ call.
+    from cellmap_data.image import CellMapImage
+    _orig_clear = CellMapImage._clear_array_cache
+    def _patched_clear_array_cache(self):
+        _orig_clear(self)
+        self._current_coords = None
+        self._current_spatial_transforms = None
+    CellMapImage._clear_array_cache = _patched_clear_array_cache
+    if main_process:
+        print("[fix] Monkey-patched CellMapImage._clear_array_cache to also clear _current_coords")
+
+    if args.class_aware_sampling:
         sampler_fn = make_class_aware_sampler(
             dataset=train_loader.dataset,
             iterations_per_epoch=args.iterations_per_epoch,
@@ -541,18 +558,16 @@ def train(args: argparse.Namespace) -> None:
         pass  # Already initialized at declaration
     # (If checkpoint restored values, they are already set)
 
-    # --- Helper: clear accumulated TensorStore handles from dataset images ---
-    # CellMapImage._ts_store is a cached_property that opens a TensorStore
-    # handle the first time the image is read. Once opened, the handle
-    # persists for the lifetime of the CellMapImage instance. With 199
-    # datasets × ~49 images each, this accumulates ~9,751 handles that each
-    # hold C++ TensorStore internal state (chunk data, open file descriptors).
-    # Combined with xarray reindex materializing full source arrays through
-    # the handle, RSS grows ~5.6 GB/step. Clearing _ts_store after each
-    # step forces re-open on next access (cheap: ~50ms) but prevents the
-    # C++ state from accumulating across the full training run.
-    def _clear_ts_handles(dataset):
-        """Clear _ts_store cached_property from all CellMapImage objects."""
+    # --- Helper: clear leaked per-iteration state from CellMapImage objects ---
+    # cellmap-data >=2026.2.28.30 (PR #64) clears the xarray `array` cache
+    # in __getitem__'s finally block and keeps `_ts_store` alive (cheap).
+    # However, `_current_coords` is still set in apply_spatial_transforms()
+    # and never cleared.  With spatial_transforms including rotation, each
+    # call stores a 128³×3 float64 meshgrid (~48 MB) that persists on the
+    # CellMapImage instance.  Over 98 images/step × 48 MB = ~4.7 GB/step
+    # of unbounded linear growth.  We clear it here after each training step.
+    def _clear_image_leaks(dataset):
+        """Clear _current_coords from all CellMapImage objects after each step."""
         from cellmap_data import CellMapImage
         try:
             datasets = dataset.datasets  # CellMapMultiDataset.datasets
@@ -562,24 +577,18 @@ def train(args: argparse.Namespace) -> None:
             # Clear input sources
             for src in getattr(ds, 'input_sources', {}).values():
                 if isinstance(src, CellMapImage):
-                    if '_ts_store' in src.__dict__:
-                        del src.__dict__['_ts_store']
-                    if 'array' in src.__dict__:
-                        del src.__dict__['array']
+                    src._current_coords = None
+                    src._current_spatial_transforms = None
             # Clear target sources (dict of class→CellMapImage)
             for target_dict in getattr(ds, 'target_sources', {}).values():
                 if isinstance(target_dict, dict):
                     for src in target_dict.values():
                         if isinstance(src, CellMapImage):
-                            if '_ts_store' in src.__dict__:
-                                del src.__dict__['_ts_store']
-                            if 'array' in src.__dict__:
-                                del src.__dict__['array']
+                            src._current_coords = None
+                            src._current_spatial_transforms = None
                 elif isinstance(target_dict, CellMapImage):
-                    if '_ts_store' in target_dict.__dict__:
-                        del target_dict.__dict__['_ts_store']
-                    if 'array' in target_dict.__dict__:
-                        del target_dict.__dict__['array']
+                    target_dict._current_coords = None
+                    target_dict._current_spatial_transforms = None
 
     # --- Memory debugging (mirrors upstream CSC train.py debug_memory feature) ---
     debug_memory = args.debug_memory
@@ -733,8 +742,8 @@ def train(args: argparse.Namespace) -> None:
                     writer.add_scalar("mem/rss_cur_mb", cur_rss_mb, n_iter)
                     writer.add_scalar("mem/rss_peak_mb", peak_mb, n_iter)
                     writer.add_scalar("mem/gpu_peak_mb", gpu_mb, n_iter)
-                # Clear accumulated TensorStore handles to prevent RSS growth
-                _clear_ts_handles(train_loader.dataset)
+                # Clear leaked _current_coords to prevent RSS growth
+                _clear_image_leaks(train_loader.dataset)
                 gc.collect()
                 torch.cuda.empty_cache()
 
