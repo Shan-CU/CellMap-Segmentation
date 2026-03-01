@@ -908,67 +908,84 @@ def train(args: argparse.Namespace) -> None:
                             vis_pred = vis_pred[:, mid, :, :]     # (C, H, W)
                             vis_gt = vis_gt[:, mid, :, :]         # (C, H, W)
 
-                        # Log raw EM input image
+                        # Normalize EM input to [0,1]
                         img_hw = vis_input[0]  # (H, W)
-                        # Normalize to [0,1]
                         img_min, img_max = img_hw.min(), img_hw.max()
                         if img_max > img_min:
                             img_hw = (img_hw - img_min) / (img_max - img_min)
-                        writer.add_image("val_vis/input", img_hw.unsqueeze(0), epoch + 1)  # (1, H, W)
 
-                        # Log per-class pred vs GT for classes with any GT or pred
-                        # Pick top-6 most active classes (by GT voxel count) for compact viz
-                        gt_counts = vis_gt.sum(dim=(-2, -1))  # (C,)
-                        pred_counts = vis_pred.sum(dim=(-2, -1))  # (C,)
-                        activity = gt_counts + pred_counts
-                        n_show = min(6, num_classes)
-                        top_classes = activity.argsort(descending=True)[:n_show]
+                        # --- Distinct color per organelle class ---
+                        # 20 perceptually distinct colors (recycled if >20 classes)
+                        CLASS_COLORS = [
+                            (1.0, 0.0, 0.0),    # red - ecs
+                            (0.0, 1.0, 0.0),    # green - pm
+                            (0.0, 0.5, 1.0),    # blue - mito_mem
+                            (1.0, 1.0, 0.0),    # yellow - mito_lum
+                            (1.0, 0.0, 1.0),    # magenta - mito_ribo
+                            (0.0, 1.0, 1.0),    # cyan - golgi_mem
+                            (1.0, 0.5, 0.0),    # orange - golgi_lum
+                            (0.5, 0.0, 1.0),    # purple - ves_mem
+                            (0.0, 1.0, 0.5),    # spring green - ves_lum
+                            (1.0, 0.0, 0.5),    # rose - endo_mem
+                            (0.5, 1.0, 0.0),    # lime - endo_lum
+                            (0.0, 0.5, 0.5),    # teal - lyso_mem
+                            (0.8, 0.4, 0.0),    # brown - lyso_lum
+                            (0.6, 0.0, 0.0),    # dark red - ld_mem
+                            (0.0, 0.6, 0.0),    # dark green - ld_lum
+                            (0.4, 0.4, 1.0),    # light blue - er_mem
+                            (1.0, 0.8, 0.6),    # peach - er_lum
+                            (0.6, 0.3, 0.6),    # mauve - eres_mem
+                            (0.3, 0.8, 0.8),    # light teal - eres_lum
+                            (0.9, 0.9, 0.0),    # gold - ne_mem
+                        ]
 
-                        for ci in top_classes:
-                            ci = ci.item()
-                            if activity[ci] == 0:
-                                continue
-                            cname = classes[ci]
-                            # 3-channel overlay: R=pred-only(FP), G=overlap(TP), B=gt-only(FN)
-                            p = vis_pred[ci]   # (H, W) binary
-                            g = vis_gt[ci]     # (H, W) binary
-                            tp = p * g
-                            fp = p * (1 - g)
-                            fn = (1 - p) * g
-                            overlay = torch.stack([fp + tp * 0.5, tp, fn + tp * 0.5], dim=0)  # (3, H, W)
-                            overlay = overlay.clamp(0, 1)
-                            writer.add_image(f"val_seg/{cname}", overlay, epoch + 1)
+                        H, W = img_hw.shape
+                        alpha = 0.55  # overlay opacity
 
-                        # Also save a composite: all-class overlay on the EM image
-                        # Union of all predictions in magenta, all GT in green
-                        all_pred = vis_pred.any(dim=0).float()  # (H, W)
-                        all_gt = vis_gt.any(dim=0).float()      # (H, W)
-                        composite = torch.stack([
-                            img_hw * 0.6 + all_pred * 0.4,   # R: EM + pred
-                            img_hw * 0.6 + all_gt * 0.4,     # G: EM + GT
-                            img_hw * 0.6,                     # B: EM only
-                        ], dim=0).clamp(0, 1)  # (3, H, W)
-                        writer.add_image("val_vis/composite", composite, epoch + 1)
+                        def _make_color_overlay(masks, label="pred"):
+                            """Build (3,H,W) EM image with colored class masks overlaid."""
+                            # Start with grayscale EM as RGB
+                            canvas = torch.stack([img_hw, img_hw, img_hw], dim=0)  # (3,H,W)
+                            for ci in range(masks.shape[0]):
+                                m = masks[ci]  # (H,W) binary
+                                if m.sum() == 0:
+                                    continue
+                                r, g, b = CLASS_COLORS[ci % len(CLASS_COLORS)]
+                                color = torch.tensor([r, g, b], dtype=canvas.dtype).view(3, 1, 1)
+                                mask_3c = m.unsqueeze(0).expand(3, -1, -1)  # (3,H,W)
+                                canvas = torch.where(
+                                    mask_3c > 0.5,
+                                    canvas * (1 - alpha) + color * alpha,
+                                    canvas,
+                                )
+                            return canvas.clamp(0, 1)
 
-                        # --- Also save to disk as PNG ---
+                        pred_overlay = _make_color_overlay(vis_pred, "pred")
+                        gt_overlay = _make_color_overlay(vis_gt, "gt")
+
+                        # Log to TensorBoard
+                        writer.add_image("val_vis/input", img_hw.unsqueeze(0), epoch + 1)
+                        writer.add_image("val_vis/prediction", pred_overlay, epoch + 1)
+                        writer.add_image("val_vis/ground_truth", gt_overlay, epoch + 1)
+
+                        # --- Save to disk as PNG ---
                         try:
                             from torchvision.utils import save_image
                             ep_dir = val_img_dir / f"epoch_{epoch+1:04d}"
                             ep_dir.mkdir(exist_ok=True)
                             save_image(img_hw.unsqueeze(0), ep_dir / "input.png")
-                            save_image(composite, ep_dir / "composite.png")
-                            for ci in top_classes:
-                                ci = ci.item()
-                                if activity[ci] == 0:
-                                    continue
-                                cname = classes[ci]
-                                p = vis_pred[ci]
-                                g = vis_gt[ci]
-                                tp = p * g
-                                fp = p * (1 - g)
-                                fn = (1 - p) * g
-                                overlay = torch.stack([fp + tp * 0.5, tp, fn + tp * 0.5], dim=0).clamp(0, 1)
-                                save_image(overlay, ep_dir / f"{cname}.png")
+                            save_image(pred_overlay, ep_dir / "prediction.png")
+                            save_image(gt_overlay, ep_dir / "ground_truth.png")
+
+                            # Also save a legend text file
+                            legend_path = ep_dir / "legend.txt"
+                            if not legend_path.exists():
+                                with open(legend_path, "w") as lf:
+                                    lf.write("Class Color Legend\n")
+                                    lf.write("=" * 40 + "\n")
+                                    for ci, cname in enumerate(classes):
+                                        r, g, b = CLASS_COLORS[ci % len(CLASS_COLORS)]
+                                        lf.write(f"{cname:20s}  RGB({r:.1f}, {g:.1f}, {b:.1f})\n")
                         except Exception as e2:
                             print(f"  [warn] Failed to save val images to disk: {e2}")
 
