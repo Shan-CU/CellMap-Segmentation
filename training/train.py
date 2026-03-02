@@ -76,6 +76,10 @@ def parse_args() -> argparse.Namespace:
                         help="Model architecture name")
     parser.add_argument("--model_kwargs", type=json.loads, default="{}",
                         help="JSON dict of extra model kwargs")
+    parser.add_argument("--bias_init", type=float, default=None,
+                        help="Initialize final conv bias to this value. "
+                        "Prevents BCE collapse on sparse targets. "
+                        "Typical value: -3.0 (sigmoid(-3)≈0.047)")
 
     # Loss
     parser.add_argument("--loss", type=str, default="balanced_softmax_tversky",
@@ -422,10 +426,17 @@ def train(args: argparse.Namespace) -> None:
     if args.deep_supervision and "segresnet" in args.model:
         model_kwargs.setdefault("dsdepth", 4)
 
+    # Bias init: prevent BCE collapse on sparse targets (RetinaNet-style)
+    if args.bias_init is not None:
+        model_kwargs["bias_init"] = args.bias_init
+
     model = build_model(args.model, **model_kwargs)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if main_process:
-        print(f"Model: {args.model} ({n_params:,} trainable params)")
+        if args.bias_init is not None:
+            print(f"Model: {args.model} ({n_params:,} trainable params, bias_init={args.bias_init})")
+        else:
+            print(f"Model: {args.model} ({n_params:,} trainable params)")
     model = model.to(device)
 
     # === DDP model wrapping ===

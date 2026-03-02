@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+import math
+
+import torch
 import torch.nn as nn
 
 # Add CSC source to path
@@ -143,20 +146,106 @@ def build_vitnet_3d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn
     )
 
 
+def _find_last_conv(model: nn.Module):
+    """Find the last Conv2d or Conv3d layer in a model (DFS order).
+
+    Returns the layer and its parent module, or (None, None).
+    """
+    last_conv = None
+    last_parent = None
+    last_attr = None
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Conv3d)):
+            last_conv = module
+            # Walk the name to find parent
+            parts = name.rsplit(".", 1)
+            if len(parts) == 2:
+                parent_name, attr = parts
+                last_parent = dict(model.named_modules())[parent_name]
+            else:
+                last_parent = model
+                attr = parts[0]
+            last_attr = attr
+    return last_conv, last_parent, last_attr
+
+
+def init_output_bias(model: nn.Module, bias_value: float) -> nn.Module:
+    """Initialize the bias of the model's final conv layer.
+
+    This implements the "prior probability" initialization from RetinaNet
+    (Lin et al., 2017). For sigmoid outputs on sparse/imbalanced targets,
+    initializing the final bias to log(p/(1-p)) where p is the expected
+    foreground fraction prevents BCE-driven collapse to all-background
+    predictions in the early training phase.
+
+    For p≈0.05 (typical organelle sparsity), bias = log(0.05/0.95) ≈ -2.94.
+    A value of -3.0 works well in practice (sigmoid(-3) ≈ 0.047).
+
+    If the final conv has no bias parameter (bias=False), this function
+    replaces it with an equivalent layer that has bias enabled.
+
+    Args:
+        model: The model to modify (in-place).
+        bias_value: Value to set for all output biases (e.g., -3.0).
+
+    Returns:
+        The model (modified in-place).
+    """
+    last_conv, parent, attr = _find_last_conv(model)
+    if last_conv is None:
+        raise RuntimeError("Could not find any Conv2d/Conv3d in model")
+
+    # If the layer has no bias, replace it with one that does
+    if last_conv.bias is None:
+        ConvClass = type(last_conv)  # nn.Conv2d or nn.Conv3d
+        new_conv = ConvClass(
+            in_channels=last_conv.in_channels,
+            out_channels=last_conv.out_channels,
+            kernel_size=last_conv.kernel_size,
+            stride=last_conv.stride,
+            padding=last_conv.padding,
+            dilation=last_conv.dilation,
+            groups=last_conv.groups,
+            bias=True,
+            padding_mode=last_conv.padding_mode,
+        )
+        # Copy the existing weights
+        new_conv.weight.data.copy_(last_conv.weight.data)
+        # Replace in parent module
+        setattr(parent, attr, new_conv)
+        last_conv = new_conv
+
+    # Initialize bias
+    nn.init.constant_(last_conv.bias, bias_value)
+    return model
+
+
 def build_model(name: str, **kwargs) -> nn.Module:
     """Build a model by name.
 
     Args:
         name: Registered model name.
         **kwargs: Arguments forwarded to the builder.
+            bias_init (float, optional): If provided, initialize the final
+                conv layer's bias to this value. Useful for preventing
+                BCE collapse on sparse targets. Typical value: -3.0.
 
     Returns:
         nn.Module model.
     """
+    # Pop bias_init before forwarding to builder (it's not a model arg)
+    bias_init = kwargs.pop("bias_init", None)
+
     if name not in MODEL_REGISTRY:
         available = ", ".join(sorted(MODEL_REGISTRY.keys()))
         raise ValueError(f"Unknown model '{name}'. Available: {available}")
-    return MODEL_REGISTRY[name]["builder"](**kwargs)
+
+    model = MODEL_REGISTRY[name]["builder"](**kwargs)
+
+    if bias_init is not None:
+        init_output_bias(model, bias_init)
+
+    return model
 
 
 def list_models() -> None:
