@@ -114,6 +114,10 @@ def parse_args() -> argparse.Namespace:
                         help="Iterations per epoch (500 for ablation, 1000 for full)")
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--optimizer", type=str, default="radam",
+                        choices=["radam", "adamw"],
+                        help="Optimizer: radam (default, variance-rectified Adam) or "
+                             "adamw (MONAI Auto3DSeg default, pair with --weight_decay 1e-5)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--random_seed", type=int, default=42)
@@ -483,11 +487,20 @@ def train(args: argparse.Namespace) -> None:
         print(f"  foreground_mask enabled: {args.use_foreground_mask}")
 
     # === Optimizer ===
-    optimizer = torch.optim.RAdam(
-        model.parameters(),
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay,
-    )
+    if args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+        )
+    else:  # radam
+        optimizer = torch.optim.RAdam(
+            model.parameters(),
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+        )
+    if main_process:
+        print(f"Optimizer: {args.optimizer} (lr={args.learning_rate:.1e}, wd={args.weight_decay})")
 
     # === Scheduler ===
     scheduler = None

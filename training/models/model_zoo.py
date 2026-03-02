@@ -58,7 +58,12 @@ def build_resnet_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn
 @register_model("unet_2d", ndim=2, description="CSC UNet 2D (~31M params)")
 def build_unet_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Module:
     from cellmap_segmentation_challenge.models import UNet_2D
-    return UNet_2D(n_channels=in_channels, n_classes=num_classes)
+    return UNet_2D(
+        n_channels=in_channels,
+        n_classes=num_classes,
+        use_instancenorm=kwargs.get("use_instancenorm", False),
+        dropout=kwargs.get("dropout", 0.0),
+    )
 
 
 @register_model("swin_2d", ndim=2, description="CSC SwinTransformer 2D (~36M params)")
@@ -72,7 +77,7 @@ def build_swin_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.M
         window_size=kwargs.get("window_size", [8, 8]),  # 8 aligns with 256→64→32→16→8
         num_classes=num_classes,
         dropout=kwargs.get("dropout", 0.1),
-        attention_dropout=kwargs.get("attention_dropout", 0.1),
+        attention_dropout=kwargs.get("attention_dropout", 0.0),  # Paper uses 0.0; stochastic_depth is the primary regularizer
         stochastic_depth_prob=kwargs.get("stochastic_depth_prob", 0.2),
     )
 
@@ -92,19 +97,22 @@ def build_vit_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Mo
 # 3D MODELS (from MONAI)
 # ============================================================================
 
-@register_model("segresnet_3d", ndim=3, description="MONAI SegResNetDS 3D (~18M params)")
+@register_model("segresnet_3d", ndim=3, description="MONAI SegResNetDS 3D (~87M params with 5-level encoder)")
 def build_segresnet_3d(
     num_classes: int = 35, in_channels: int = 1, **kwargs
 ) -> nn.Module:
     from monai.networks.nets import SegResNetDS
+    # MONAI Auto3DSeg official defaults: 5-level encoder, instance norm, deep supervision.
+    # See: research-contributions/auto3dseg/algorithm_templates/segresnet/configs/hyper_parameters.yaml
     return SegResNetDS(
         spatial_dims=3,
         in_channels=in_channels,
         out_channels=num_classes,
         init_filters=kwargs.get("init_filters", 32),
-        blocks_down=kwargs.get("blocks_down", (1, 2, 2, 4)),
-        blocks_up=kwargs.get("blocks_up", (1, 1, 1)),
-        dsdepth=kwargs.get("dsdepth", 1),  # 1 = no deep supervision
+        blocks_down=kwargs.get("blocks_down", (1, 2, 2, 4, 4)),
+        blocks_up=kwargs.get("blocks_up", (1, 1, 1, 1)),
+        dsdepth=kwargs.get("dsdepth", 4),  # 4 = deep supervision (3 aux outputs)
+        norm=kwargs.get("norm", "INSTANCE"),  # instance norm standard for small-batch medical seg
     )
 
 
@@ -121,20 +129,33 @@ def build_swinunetr_3d(
         feature_size=kwargs.get("feature_size", 48),
         drop_rate=kwargs.get("drop_rate", 0.0),
         attn_drop_rate=kwargs.get("attn_drop_rate", 0.0),
+        use_checkpoint=kwargs.get("use_checkpoint", False),  # gradient checkpointing saves VRAM
         spatial_dims=3,
     )
 
 
-@register_model("unet_3d", ndim=3, description="CSC UNet 3D")
+@register_model("unet_3d", ndim=3, description="CSC UNet 3D (~31M params)")
 def build_unet_3d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Module:
     from cellmap_segmentation_challenge.models import UNet_3D
-    return UNet_3D(n_channels=in_channels, n_classes=num_classes)
+    return UNet_3D(
+        n_channels=in_channels,
+        n_classes=num_classes,
+        use_instancenorm=kwargs.get("use_instancenorm", False),
+        dropout=kwargs.get("dropout", 0.0),
+    )
 
 
-@register_model("resnet_3d", ndim=3, description="CSC ResNet 3D")
+@register_model("resnet_3d", ndim=3, description="CSC ResNet 3D (~7.8M params)")
 def build_resnet_3d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.Module:
     from cellmap_segmentation_challenge.models import ResNet
-    return ResNet(ndims=3, input_nc=in_channels, output_nc=num_classes)
+    return ResNet(
+        ndims=3,
+        input_nc=in_channels,
+        output_nc=num_classes,
+        ngf=kwargs.get("ngf", 64),
+        n_blocks=kwargs.get("n_blocks", 6),
+        n_downsampling=kwargs.get("n_downsampling", 2),
+    )
 
 
 @register_model("vitnet_3d", ndim=3, description="CSC ViTVNet 3D (~28M params)")

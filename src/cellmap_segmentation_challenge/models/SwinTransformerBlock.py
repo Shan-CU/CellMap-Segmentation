@@ -465,17 +465,24 @@ class SwinTransformerBlockV2(SwinTransformerBlock):
         return x
 
 class DoubleConv(nn.Module):
+    """Decoder double convolution block.
+    
+    Uses InstanceNorm2d for consistency with medical segmentation best practices
+    and stability at small batch sizes. The Swin V2 encoder uses LayerNorm;
+    InstanceNorm in the decoder provides per-sample normalization that is
+    robust regardless of batch size (unlike BatchNorm).
+    """
 
-    def __init__(self, in_channels, out_channels, hidden_channels =None):
+    def __init__(self, in_channels, out_channels, hidden_channels=None):
         super(DoubleConv, self).__init__()
         if not hidden_channels:
             hidden_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_channels),
+            nn.InstanceNorm2d(hidden_channels, affine=True),
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            nn.InstanceNorm2d(out_channels, affine=True),
             nn.ReLU(inplace=True),
         )
 
@@ -492,8 +499,8 @@ class Unet_Block_Up(nn.Module):
         # )
         self.up = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-            nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1),
-            nn.BatchNorm2d(in_channels//2),
+            nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm2d(in_channels//2, affine=True),
             nn.ReLU(inplace=True)
         )
         self.conv = DoubleConv(in_channels, out_channels)
@@ -521,18 +528,16 @@ class SegmentationHead(nn.Module):
         self.hidden_channels = in_channels//2
 
         self.head = nn.Sequential(
-            # nn.ConvTranspose2d(self.in_channels, self.in_channels, kernel_size=2, stride=2),
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
 
             nn.Conv2d(self.in_channels, self.hidden_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(self.hidden_channels),
+            nn.InstanceNorm2d(self.hidden_channels, affine=True),
             nn.ReLU(inplace=True),
 
-            # nn.ConvTranspose2d(self.hidden_channels, self.hidden_channels, kernel_size=2, stride=2),
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
 
             nn.Conv2d(self.hidden_channels, self.hidden_channels//2, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(self.hidden_channels//2),
+            nn.InstanceNorm2d(self.hidden_channels//2, affine=True),
             nn.ReLU(inplace=True),
 
             nn.Conv2d(self.hidden_channels//2, self.out_channels, kernel_size=3, padding=1, bias=False)
