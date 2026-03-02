@@ -69,7 +69,7 @@ python -m training.train \
     --num_workers 4 \
     --amp \
     --ema --ema_decay 0.999 \
-    --bias_init -3.0 \
+    --bias_init_mode per_class \
     --optimizer radam \
     --weight_decay 0.0 \
     --random_seed 42 \

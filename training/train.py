@@ -76,10 +76,14 @@ def parse_args() -> argparse.Namespace:
                         help="Model architecture name")
     parser.add_argument("--model_kwargs", type=json.loads, default="{}",
                         help="JSON dict of extra model kwargs")
+    parser.add_argument("--bias_init_mode", type=str, default="none",
+                        choices=["none", "uniform", "per_class"],
+                        help="Bias init strategy for final conv. "
+                        "none=skip, uniform=scalar (needs --bias_init), "
+                        "per_class=per-channel from dataset frequencies")
     parser.add_argument("--bias_init", type=float, default=None,
-                        help="Initialize final conv bias to this value. "
-                        "Prevents BCE collapse on sparse targets. "
-                        "Typical value: -3.0 (sigmoid(-3)≈0.047)")
+                        help="Scalar bias value for --bias_init_mode uniform "
+                        "(e.g., -3.0). Ignored for other modes.")
 
     # Loss
     parser.add_argument("--loss", type=str, default="dice_bce",
@@ -431,13 +435,17 @@ def train(args: argparse.Namespace) -> None:
         model_kwargs.setdefault("dsdepth", 4)
 
     # Bias init: prevent BCE collapse on sparse targets (RetinaNet-style)
-    if args.bias_init is not None:
-        model_kwargs["bias_init"] = args.bias_init
+    if args.bias_init_mode != "none":
+        model_kwargs["bias_init_mode"] = args.bias_init_mode
+        if args.bias_init is not None:
+            model_kwargs["bias_init"] = args.bias_init
 
     model = build_model(args.model, **model_kwargs)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if main_process:
-        if args.bias_init is not None:
+        if args.bias_init_mode == "per_class":
+            print(f"Model: {args.model} ({n_params:,} trainable params, bias_init=per_class)")
+        elif args.bias_init_mode == "uniform":
             print(f"Model: {args.model} ({n_params:,} trainable params, bias_init={args.bias_init})")
         else:
             print(f"Model: {args.model} ({n_params:,} trainable params)")

@@ -79,7 +79,7 @@ python -m training.train \
     --num_workers 4 \
     --amp \
     --ema --ema_decay 0.999 \
-    --bias_init -3.0 \
+    --bias_init_mode per_class \
     --optimizer adamw \
     --weight_decay 1e-5 \
     --deep_supervision \

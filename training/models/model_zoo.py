@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Sequence, Union
 
 import math
 
@@ -24,6 +24,118 @@ if str(CSC_SRC) not in sys.path:
     sys.path.insert(0, str(CSC_SRC))
 
 MODEL_REGISTRY: Dict[str, dict] = {}
+
+
+# ============================================================================
+# Per-class prior probability bias initialization (RetinaNet-style)
+# ============================================================================
+# Voxel counts from CLASS_REFERENCE.md (42.3B total annotated voxels).
+# Order MUST match get_tested_classes() from cellmap_segmentation_challenge.
+# Group classes use their pre-computed OR voxel counts (Section 6).
+#
+# bias_c = log(π_c / (1 - π_c))  where π_c = voxels_c / total_voxels
+# Clamped to [-10, 0] to avoid numerical extremes.
+#
+# References:
+#   - Lin et al., "Focal Loss for Dense Object Detection" (ICCV 2017)
+#   - Isensee et al., nnU-Net v2 (2024) — same principle
+# ============================================================================
+
+_TOTAL_VOXELS = 42_341_742_368
+
+# fmt: off
+# (class_name, voxel_count) — 48 entries, order matches get_tested_classes()
+_CLASS_VOXEL_COUNTS: list[tuple[str, int]] = [
+    # === Atomic classes (0–28) ===
+    ("ecs",        3_750_644_301),   # 0  — extracellular space
+    ("pm",           365_966_884),   # 1  — plasma membrane
+    ("mito_mem",     740_946_964),   # 2  — mitochondrial membrane
+    ("mito_lum",     910_826_941),   # 3  — mitochondrial lumen
+    ("mito_ribo",      1_643_455),   # 4  — mitochondrial ribosomes
+    ("golgi_mem",     63_358_310),   # 5  — Golgi membrane
+    ("golgi_lum",     90_271_273),   # 6  — Golgi lumen
+    ("ves_mem",       20_218_267),   # 7  — vesicle membrane
+    ("ves_lum",       11_410_160),   # 8  — vesicle lumen
+    ("endo_mem",      97_744_082),   # 9  — endosome membrane
+    ("endo_lum",     203_076_684),   # 10 — endosome lumen
+    ("lyso_mem",      20_217_077),   # 11 — lysosome membrane
+    ("lyso_lum",      64_241_359),   # 12 — lysosome lumen
+    ("ld_mem",        14_896_191),   # 13 — lipid droplet membrane
+    ("ld_lum",       120_758_049),   # 14 — lipid droplet lumen
+    ("er_mem",       523_064_850),   # 15 — ER membrane
+    ("er_lum",       654_688_548),   # 16 — ER lumen
+    ("eres_mem",       5_456_843),   # 17 — ER exit site membrane
+    ("eres_lum",       5_252_100),   # 18 — ER exit site lumen
+    ("ne_mem",        56_357_675),   # 19 — nuclear envelope membrane
+    ("ne_lum",        50_414_607),   # 20 — nuclear envelope lumen
+    ("np_out",         4_086_527),   # 21 — nuclear pore outer ring
+    ("np_in",          2_798_532),   # 22 — nuclear pore inner ring
+    ("hchrom",       302_119_910),   # 23 — heterochromatin
+    ("echrom",         5_585_955),   # 24 — euchromatin
+    ("nucpl",        604_553_039),   # 25 — nucleoplasm
+    ("mt_out",        38_248_677),   # 26 — microtubule outer wall
+    ("cyto",       7_557_206_558),   # 27 — cytoplasm
+    ("mt_in",         17_017_019),   # 28 — microtubule lumen
+    # === Group / composite classes (29–47) ===
+    ("nuc",        3_533_146_803),   # 29 — nucleus (OR of 10 nuclear atomics)
+    ("golgi",        153_629_583),   # 30 — all Golgi
+    ("ves",           31_628_427),   # 31 — all vesicles
+    ("endo",         300_820_766),   # 32 — all endosomes
+    ("lyso",          84_458_436),   # 33 — all lysosomes
+    ("ld",           142_488_418),   # 34 — all lipid droplets
+    ("eres",          10_708_943),   # 35 — all ER exit sites
+    ("perox_mem",      5_857_060),   # 36 — peroxisome membrane
+    ("perox_lum",     16_430_634),   # 37 — peroxisome lumen
+    ("perox",         24_342_923),   # 38 — all peroxisomes
+    ("mito",       1_735_204_611),   # 39 — all mitochondria
+    ("er",         1_302_119_682),   # 40 — entire ER system (incl. NE)
+    ("ne",           113_657_341),   # 41 — entire nuclear envelope
+    ("np",             6_885_059),   # 42 — nuclear pores
+    ("chrom",        324_920_357),   # 43 — all chromatin
+    ("mt",            55_265_696),   # 44 — all microtubules
+    ("cell",      12_589_379_127),   # 45 — everything intracellular
+    ("er_mem_all",   584_879_368),   # 46 — all ER-related membranes
+    ("ne_mem_all",    63_242_734),   # 47 — NE membrane + pores
+]
+# fmt: on
+
+_BIAS_CLAMP_MIN = -10.0
+_BIAS_CLAMP_MAX = 0.0
+
+
+def get_per_class_bias_init(num_classes: int = 48) -> list[float]:
+    """Compute per-class bias init from dataset voxel frequencies.
+
+    Each bias is: b_c = clamp(log(π_c / (1 - π_c)), -10, 0)
+    where π_c is the global voxel fraction for class c.
+
+    This ensures each sigmoid output starts near the true class prior,
+    preventing BCE-driven collapse on both common classes (cyto/ecs start
+    near their true ~18-30% prior) and rare classes (np_in starts at
+    ~0.007% instead of the 4.7% from a uniform -3.0 bias).
+
+    Args:
+        num_classes: Number of output channels (must be <= 48).
+
+    Returns:
+        List of bias values, one per output channel.
+    """
+    if num_classes > len(_CLASS_VOXEL_COUNTS):
+        raise ValueError(
+            f"num_classes={num_classes} exceeds the {len(_CLASS_VOXEL_COUNTS)} "
+            f"known classes. Cannot compute per-class bias."
+        )
+    biases = []
+    for i in range(num_classes):
+        _name, voxels = _CLASS_VOXEL_COUNTS[i]
+        frac = voxels / _TOTAL_VOXELS
+        if frac <= 0:
+            b = _BIAS_CLAMP_MIN
+        else:
+            b = math.log(frac / (1.0 - frac))
+        b = max(_BIAS_CLAMP_MIN, min(_BIAS_CLAMP_MAX, b))
+        biases.append(b)
+    return biases
 
 
 def register_model(name: str, ndim: int, description: str = ""):
@@ -190,24 +302,30 @@ def _find_last_conv(model: nn.Module):
     return last_conv, last_parent, last_attr
 
 
-def init_output_bias(model: nn.Module, bias_value: float) -> nn.Module:
+def init_output_bias(
+    model: nn.Module,
+    bias_value: Union[float, Sequence[float]],
+) -> nn.Module:
     """Initialize the bias of the model's final conv layer.
 
-    This implements the "prior probability" initialization from RetinaNet
-    (Lin et al., 2017). For sigmoid outputs on sparse/imbalanced targets,
-    initializing the final bias to log(p/(1-p)) where p is the expected
-    foreground fraction prevents BCE-driven collapse to all-background
-    predictions in the early training phase.
+    Implements "prior probability" initialization (RetinaNet, Lin et al. 2017).
 
-    For p≈0.05 (typical organelle sparsity), bias = log(0.05/0.95) ≈ -2.94.
-    A value of -3.0 works well in practice (sigmoid(-3) ≈ 0.047).
+    For sigmoid outputs on imbalanced multi-label targets, initializing each
+    output channel's bias to log(π_c / (1 - π_c)) — where π_c is the expected
+    foreground fraction for class c — prevents BCE-driven gradient collapse.
+
+    Supports two modes:
+      - Scalar: all output biases set to the same value (e.g., -3.0).
+      - Per-class vector: each output channel gets its own bias from the
+        dataset frequency distribution. Use get_per_class_bias_init().
 
     If the final conv has no bias parameter (bias=False), this function
     replaces it with an equivalent layer that has bias enabled.
 
     Args:
         model: The model to modify (in-place).
-        bias_value: Value to set for all output biases (e.g., -3.0).
+        bias_value: Either a single float (uniform) or a sequence of floats
+                    (one per output channel). Length must match out_channels.
 
     Returns:
         The model (modified in-place).
@@ -236,8 +354,18 @@ def init_output_bias(model: nn.Module, bias_value: float) -> nn.Module:
         setattr(parent, attr, new_conv)
         last_conv = new_conv
 
-    # Initialize bias
-    nn.init.constant_(last_conv.bias, bias_value)
+    # Initialize bias — scalar or per-channel vector
+    if isinstance(bias_value, (list, tuple)):
+        if len(bias_value) != last_conv.out_channels:
+            raise ValueError(
+                f"Per-class bias vector length ({len(bias_value)}) != "
+                f"output channels ({last_conv.out_channels})"
+            )
+        with torch.no_grad():
+            last_conv.bias.copy_(torch.tensor(bias_value, dtype=last_conv.bias.dtype))
+    else:
+        nn.init.constant_(last_conv.bias, float(bias_value))
+
     return model
 
 
@@ -247,14 +375,20 @@ def build_model(name: str, **kwargs) -> nn.Module:
     Args:
         name: Registered model name.
         **kwargs: Arguments forwarded to the builder.
-            bias_init (float, optional): If provided, initialize the final
-                conv layer's bias to this value. Useful for preventing
-                BCE collapse on sparse targets. Typical value: -3.0.
+            bias_init_mode (str, optional): How to initialize the final conv bias.
+                "none"      – skip bias init (default if omitted).
+                "uniform"   – set all output biases to a single scalar; requires
+                              ``bias_init`` kwarg (e.g., -3.0).
+                "per_class" – set each output channel's bias to
+                              log(π_c / (1 - π_c)) from the dataset frequency
+                              distribution (see get_per_class_bias_init).
+            bias_init (float, optional): Scalar value for mode="uniform".
 
     Returns:
         nn.Module model.
     """
-    # Pop bias_init before forwarding to builder (it's not a model arg)
+    # Pop bias-init kwargs before forwarding to builder (not model args)
+    bias_init_mode = kwargs.pop("bias_init_mode", "none")
     bias_init = kwargs.pop("bias_init", None)
 
     if name not in MODEL_REGISTRY:
@@ -263,8 +397,21 @@ def build_model(name: str, **kwargs) -> nn.Module:
 
     model = MODEL_REGISTRY[name]["builder"](**kwargs)
 
-    if bias_init is not None:
-        init_output_bias(model, bias_init)
+    # Apply bias initialisation
+    if bias_init_mode == "uniform":
+        if bias_init is None:
+            raise ValueError("bias_init_mode='uniform' requires --bias_init <float>")
+        init_output_bias(model, float(bias_init))
+    elif bias_init_mode == "per_class":
+        # Builders use num_classes (CSC models) or out_channels (MONAI).
+        num_classes = kwargs.get("num_classes", kwargs.get("out_channels", 48))
+        per_class_biases = get_per_class_bias_init(num_classes)
+        init_output_bias(model, per_class_biases)
+    elif bias_init_mode != "none":
+        raise ValueError(
+            f"Unknown bias_init_mode '{bias_init_mode}'. "
+            f"Choose from: none, uniform, per_class"
+        )
 
     return model
 
