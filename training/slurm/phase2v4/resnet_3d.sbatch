@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=p2v4_resnet_3d
-#SBATCH --partition=l40-gpu
+#SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
@@ -11,7 +11,7 @@
 #SBATCH --error=runs/ablation/logs/p2v4_resnet_3d_%j.err
 
 # ============================================================================
-# Phase 2 v4: ResNet 3D on L40S 48GB
+# Phase 2 v4: ResNet 3D on A100 80GB
 # ============================================================================
 # Architecture: Johnson-style ResNet (resnet.py) — ~7.8M params
 #   - InstanceNorm by default, 6 ResBlocks, ngf=64, 2 downsampling stages

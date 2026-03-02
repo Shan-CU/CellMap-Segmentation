@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=p2v4_unet_3d
-#SBATCH --partition=l40-gpu
+#SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
@@ -11,7 +11,7 @@
 #SBATCH --error=runs/ablation/logs/p2v4_unet_3d_%j.err
 
 # ============================================================================
-# Phase 2 v4: UNet 3D on L40S 48GB
+# Phase 2 v4: UNet 3D on A100 80GB
 # ============================================================================
 # Architecture: Standard UNet (unet_model_3D.py) — ~31M params
 #   - 4 down/up stages (64→128→256→512→1024)
