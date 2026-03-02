@@ -82,9 +82,9 @@ def parse_args() -> argparse.Namespace:
                         "Typical value: -3.0 (sigmoid(-3)≈0.047)")
 
     # Loss
-    parser.add_argument("--loss", type=str, default="balanced_softmax_tversky",
+    parser.add_argument("--loss", type=str, default="dice_bce",
                         choices=list(LOSS_REGISTRY.keys()),
-                        help="Loss function name")
+                        help="Loss function name (dice_bce = Phase 1 ablation winner)")
     parser.add_argument("--loss_kwargs", type=json.loads, default="{}",
                         help="JSON dict of extra loss kwargs")
 
@@ -108,10 +108,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--filter_by_scale", action="store_true", default=True)
 
     # Training
-    parser.add_argument("--epochs", type=int, default=50,
-                        help="Number of epochs (50 for ablation, 1000 for full training)")
-    parser.add_argument("--iterations_per_epoch", type=int, default=500,
-                        help="Iterations per epoch (500 for ablation, 1000 for full)")
+    parser.add_argument("--epochs", type=int, required=True,
+                        help="Number of epochs (e.g., 100 for 2D, 1000 for 3D)")
+    parser.add_argument("--iterations_per_epoch", type=int, required=True,
+                        help="Iterations per epoch (e.g., 1000 for 2D, 300 for 3D)")
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--optimizer", type=str, default="radam",

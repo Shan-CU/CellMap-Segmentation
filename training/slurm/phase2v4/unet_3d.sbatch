@@ -74,4 +74,10 @@ python -m training.train \
     --amp \
     --ema --ema_decay 0.999 \
     --bias_init -3.0 \
+    --optimizer radam \
+    --weight_decay 0.0 \
+    --random_seed 42 \
+    --use_foreground_mask \
+    --datasplit_path datasplit.csv \
+    --filter_by_scale \
     --model_kwargs '{"use_instancenorm": true, "dropout": 0.1}'

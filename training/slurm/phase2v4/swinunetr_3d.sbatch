@@ -78,4 +78,8 @@ python -m training.train \
     --bias_init -3.0 \
     --optimizer adamw \
     --weight_decay 1e-5 \
-    --model_kwargs '{"use_checkpoint": true}'
+    --model_kwargs '{"use_checkpoint": true}' \
+    --random_seed 42 \
+    --use_foreground_mask \
+    --datasplit_path datasplit.csv \
+    --filter_by_scale

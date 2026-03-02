@@ -75,4 +75,8 @@ python -m training.train \
     --ema --ema_decay 0.999 \
     --bias_init -3.0 \
     --optimizer adamw \
-    --weight_decay 0.05
+    --weight_decay 0.05 \
+    --random_seed 42 \
+    --use_foreground_mask \
+    --datasplit_path datasplit.csv \
+    --filter_by_scale

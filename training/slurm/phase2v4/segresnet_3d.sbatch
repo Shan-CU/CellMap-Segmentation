@@ -82,4 +82,8 @@ python -m training.train \
     --bias_init -3.0 \
     --optimizer adamw \
     --weight_decay 1e-5 \
-    --deep_supervision
+    --deep_supervision \
+    --random_seed 42 \
+    --use_foreground_mask \
+    --datasplit_path datasplit.csv \
+    --filter_by_scale
