@@ -188,7 +188,7 @@ def build_swin_2d(num_classes: int = 35, in_channels: int = 1, **kwargs) -> nn.M
         num_heads=kwargs.get("num_heads", [3, 6, 12, 24]),
         window_size=kwargs.get("window_size", [8, 8]),  # 8 aligns with 256→64→32→16→8
         num_classes=num_classes,
-        dropout=kwargs.get("dropout", 0.1),
+        dropout=kwargs.get("dropout", 0.0),  # Was 0.1; removed — over-regularized with wd+stochastic_depth
         attention_dropout=kwargs.get("attention_dropout", 0.0),  # Paper uses 0.0; stochastic_depth is the primary regularizer
         stochastic_depth_prob=kwargs.get("stochastic_depth_prob", 0.2),
     )

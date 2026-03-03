@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=p2v4_vit_2d
-#SBATCH --partition=l40-gpu
+#SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
@@ -11,7 +11,7 @@
 #SBATCH --error=runs/ablation/logs/p2v4_vit_2d_%j.err
 
 # ============================================================================
-# Phase 2 v4: ViT-V-Net 2D on L40S 48GB
+# Phase 2 v4: ViT-V-Net 2D on A100 80GB (moved from L40S — l40 queue 2-day wait)
 # ============================================================================
 # Architecture: 2D adaptation of ViT-V-Net (vit_2d.py) — ~105M params
 #   - hidden_size=768, 12 layers, 12 heads, patch_size=16, img_size=256
@@ -25,8 +25,12 @@
 #
 # Key fix: bias_init=-3.0 (v2/v3 collapsed to 0.000 dice without this)
 #
+# Note: batch=4 + grad_accum=2 (effective batch=8). batch=8+AMP triggers
+#   cudaErrorInvalidConfiguration in DiceBCE backward (PyTorch 2.10 + CUDA 12.8
+#   kernel launch bug with large activation tensors). batch=4+AMP is stable.
+#
 # Recipe: dice_bce + EMA(0.999) + fg_mask + weighted_sampler
-# Training: 100 epochs × 1000 iters, batch=8, 256×256 patches
+# Training: 100 epochs × 1000 iters, batch=4 (×2 accum), 256×256 patches
 # Validation: every 5 epochs, per-class Dice (48 classes), 600s time limit
 # ============================================================================
 
@@ -57,13 +61,14 @@ python -m training.train \
     --run_dir runs/ablation \
     --model vit_2d \
     --loss dice_bce \
-    --batch_size 8 \
+    --batch_size 4 \
     --input_shape 1 256 256 \
     --input_scale 8 8 8 \
     --epochs 100 \
     --iterations_per_epoch 1000 \
     --learning_rate 1e-4 \
     --max_grad_norm 1.0 \
+    --gradient_accumulation_steps 2 \
     --scheduler cosine \
     --warmup_epochs 10 \
     --validation_time_limit 600 \

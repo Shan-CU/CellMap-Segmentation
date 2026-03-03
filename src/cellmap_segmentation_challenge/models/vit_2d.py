@@ -30,7 +30,7 @@ class Conv2dReLU(nn.Sequential):
             padding=padding,
             bias=not use_batchnorm,
         )
-        relu = nn.LeakyReLU(inplace=True)
+        relu = nn.LeakyReLU(inplace=False)
         
         if use_batchnorm:
             bn = nn.BatchNorm2d(out_channels)
@@ -327,7 +327,7 @@ class CNNEncoder2D(nn.Module):
         self.init_conv = nn.Sequential(
             nn.Conv2d(in_channels, self.base_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(self.base_channels),
-            nn.LeakyReLU(inplace=True),
+            nn.LeakyReLU(inplace=False),
         )
         
         # Encoder stages
@@ -339,10 +339,10 @@ class CNNEncoder2D(nn.Module):
                 nn.Sequential(
                     nn.Conv2d(current_channels, out_ch, kernel_size=3, padding=1, bias=False),
                     nn.BatchNorm2d(out_ch),
-                    nn.LeakyReLU(inplace=True),
+                    nn.LeakyReLU(inplace=False),
                     nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
                     nn.BatchNorm2d(out_ch),
-                    nn.LeakyReLU(inplace=True),
+                    nn.LeakyReLU(inplace=False),
                 )
             )
             

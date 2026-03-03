@@ -1,17 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=p2v4_swin_2d
-#SBATCH --partition=l40-gpu
+#SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 #SBATCH --time=11-00:00:00
 #SBATCH --output=runs/ablation/logs/p2v4_swin_2d_%j.out
 #SBATCH --error=runs/ablation/logs/p2v4_swin_2d_%j.err
 
 # ============================================================================
-# Phase 2 v4: Swin Transformer V2 2D on L40S 48GB
+# Phase 2 v4: Swin Transformer V2 2D on A100 80GB (moved from L40S to free slot for ViT-2D)
 # ============================================================================
 # Architecture: Swin V2 (SwinTransformerBlock.py) — ~36M params
 #   - embed_dim=96, depths=[2,2,6,2], window_size=8
@@ -19,10 +19,11 @@
 #   - UNet-style decoder with Unet_Block_Up, SegmentationHead (2× upsample)
 #   - Decoder uses InstanceNorm2d (fixed from BatchNorm2d for stability)
 #
-# Optimizer: AdamW, lr=1e-4, wd=0.05
-#   - From Swin V2 paper (Liu et al. CVPR 2022):
-#     AdamW, lr=1e-4, wd=0.05, stochastic_depth=0.2, attention_dropout=0.0
-#   - Paper uses stochastic_depth (not attention dropout) as primary regularizer
+# Optimizer: AdamW, lr=5e-4, wd=0.01, warmup=20, grad_clip=5.0
+#   - Previous config (lr=1e-4, wd=0.05, dropout=0.1) was heavily over-regularized
+#   - Reduced wd 0.05→0.01, removed dropout (0.1→0.0 in model_zoo.py)
+#   - Raised LR 1e-4→5e-4 (Swin V2 paper uses 5e-4 for fine-tuning)
+#   - Extended warmup 10→20, relaxed grad_clip 1.0→5.0 for higher LR
 #
 # Key fix: bias_init=-3.0 (v2/v3 collapsed to 0.000 dice without this)
 #
@@ -49,7 +50,7 @@ export MALLOC_TRIM_THRESHOLD_=65536
 export MALLOC_MMAP_THRESHOLD_=65536
 
 echo "============================================"
-echo "Phase 2 v4: Swin Transformer V2 2D (AdamW + wd=0.05)"
+echo "Phase 2 v4: Swin Transformer V2 2D (AdamW, lr=5e-4, wd=0.01, dropout=0.0)"
 echo "Node: $(hostname) | GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 echo "============================================"
 
@@ -63,10 +64,10 @@ python -m training.train \
     --input_scale 8 8 8 \
     --epochs 100 \
     --iterations_per_epoch 1000 \
-    --learning_rate 1e-4 \
-    --max_grad_norm 1.0 \
+    --learning_rate 5e-4 \
+    --max_grad_norm 5.0 \
     --scheduler cosine \
-    --warmup_epochs 10 \
+    --warmup_epochs 20 \
     --validation_time_limit 600 \
     --val_every_n_epochs 5 \
     --best_metric val_dice \
@@ -75,7 +76,7 @@ python -m training.train \
     --ema --ema_decay 0.999 \
     --bias_init_mode per_class \
     --optimizer adamw \
-    --weight_decay 0.05 \
+    --weight_decay 0.01 \
     --random_seed 42 \
     --use_foreground_mask \
     --datasplit_path datasplit.csv \

@@ -726,11 +726,10 @@ def train(args: argparse.Namespace) -> None:
 
             scaler.scale(loss).backward()
 
-            if args.max_grad_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-
             if (step + 1) % args.gradient_accumulation_steps == 0:
+                if args.max_grad_norm is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
@@ -867,13 +866,25 @@ def train(args: argparse.Namespace) -> None:
                     dice_fp += (preds * (1 - gt) * valid).sum(dim=(0, *spatial_dims))
                     dice_fn += ((1 - preds) * gt * valid).sum(dim=(0, *spatial_dims))
 
-                    # Capture first batch's first sample for visualization
+                    # Capture a non-empty sample for visualization (rank 0 only)
+                    # Skip all-black crops — pick the first sample with ≥1% annotated
+                    # pixels AND non-zero EM input (most validation blocks are empty
+                    # padded regions with all-zero inputs — see cellmap-data issue).
                     if vis_sample is None and main_process:
-                        vis_sample = (
-                            inputs[0].detach().cpu(),         # (1, *spatial) or (1, D, H, W)
-                            preds[0].detach().cpu(),          # (C, *spatial)
-                            gt[0].detach().cpu(),             # (C, *spatial)
-                        )
+                        for bi in range(inputs.shape[0]):
+                            inp_bi = inputs[bi]   # (1, *spatial)
+                            gt_bi = gt[bi]         # (C, *spatial)
+                            # Require real EM signal (not an empty padded block)
+                            if inp_bi.abs().max() < 1e-6:
+                                continue
+                            frac = gt_bi.sum() / max(gt_bi.numel(), 1)
+                            if frac > 0.01:  # at least 1% of pixels have annotations
+                                vis_sample = (
+                                    inp_bi.detach().cpu(),
+                                    preds[bi].detach().cpu(),
+                                    gt_bi.detach().cpu(),
+                                )
+                                break
 
                     if time.time() - val_start > args.validation_time_limit:
                         break
@@ -947,28 +958,56 @@ def train(args: argparse.Namespace) -> None:
                             img_hw = (img_hw - img_min) / (img_max - img_min)
 
                         # --- Distinct color per organelle class ---
-                        # 20 perceptually distinct colors (recycled if >20 classes)
+                        # 48 perceptually distinct colors (3 HSV rings × 16 hues, interleaved)
                         CLASS_COLORS = [
-                            (1.0, 0.0, 0.0),    # red - ecs
-                            (0.0, 1.0, 0.0),    # green - pm
-                            (0.0, 0.5, 1.0),    # blue - mito_mem
-                            (1.0, 1.0, 0.0),    # yellow - mito_lum
-                            (1.0, 0.0, 1.0),    # magenta - mito_ribo
-                            (0.0, 1.0, 1.0),    # cyan - golgi_mem
-                            (1.0, 0.5, 0.0),    # orange - golgi_lum
-                            (0.5, 0.0, 1.0),    # purple - ves_mem
-                            (0.0, 1.0, 0.5),    # spring green - ves_lum
-                            (1.0, 0.0, 0.5),    # rose - endo_mem
-                            (0.5, 1.0, 0.0),    # lime - endo_lum
-                            (0.0, 0.5, 0.5),    # teal - lyso_mem
-                            (0.8, 0.4, 0.0),    # brown - lyso_lum
-                            (0.6, 0.0, 0.0),    # dark red - ld_mem
-                            (0.0, 0.6, 0.0),    # dark green - ld_lum
-                            (0.4, 0.4, 1.0),    # light blue - er_mem
-                            (1.0, 0.8, 0.6),    # peach - er_lum
-                            (0.6, 0.3, 0.6),    # mauve - eres_mem
-                            (0.3, 0.8, 0.8),    # light teal - eres_lum
-                            (0.9, 0.9, 0.0),    # gold - ne_mem
+                            (0.9, 0.0, 0.0),      #  0 ecs
+                            (0.35, 1.0, 0.35),     #  1 pm
+                            (0.0, 0.0, 0.5),       #  2 mito_mem
+                            (0.9, 0.338, 0.0),     #  3 mito_lum
+                            (0.35, 1.0, 0.594),    #  4 mito_ribo
+                            (0.188, 0.0, 0.5),     #  5 golgi_mem
+                            (0.9, 0.675, 0.0),     #  6 golgi_lum
+                            (0.35, 1.0, 0.838),    #  7 ves_mem
+                            (0.375, 0.0, 0.5),     #  8 ves_lum
+                            (0.787, 0.9, 0.0),     #  9 endo_mem
+                            (0.35, 0.919, 1.0),    # 10 endo_lum
+                            (0.5, 0.0, 0.438),     # 11 lyso_mem
+                            (0.45, 0.9, 0.0),      # 12 lyso_lum
+                            (0.35, 0.675, 1.0),    # 13 ld_mem
+                            (0.5, 0.0, 0.25),      # 14 ld_lum
+                            (0.113, 0.9, 0.0),     # 15 er_mem
+                            (0.35, 0.431, 1.0),    # 16 er_lum
+                            (0.5, 0.0, 0.062),     # 17 eres_mem
+                            (0.0, 0.9, 0.225),     # 18 eres_lum
+                            (0.512, 0.35, 1.0),    # 19 ne_mem
+                            (0.5, 0.125, 0.0),     # 20 ne_lum
+                            (0.0, 0.9, 0.562),     # 21 np_out
+                            (0.756, 0.35, 1.0),    # 22 np_in
+                            (0.5, 0.312, 0.0),     # 23 hchrom
+                            (0.0, 0.9, 0.9),       # 24 echrom
+                            (1.0, 0.35, 1.0),      # 25 nucpl
+                            (0.5, 0.5, 0.0),       # 26 mt_out
+                            (0.0, 0.562, 0.9),     # 27 cyto
+                            (1.0, 0.35, 0.756),    # 28 mt_in
+                            (0.312, 0.5, 0.0),     # 29 nuc
+                            (0.0, 0.225, 0.9),     # 30 golgi
+                            (1.0, 0.35, 0.512),    # 31 ves
+                            (0.125, 0.5, 0.0),     # 32 endo
+                            (0.113, 0.0, 0.9),     # 33 lyso
+                            (1.0, 0.431, 0.35),    # 34 ld
+                            (0.0, 0.5, 0.062),     # 35 eres
+                            (0.45, 0.0, 0.9),      # 36 perox_mem
+                            (1.0, 0.675, 0.35),    # 37 perox_lum
+                            (0.0, 0.5, 0.25),      # 38 perox
+                            (0.787, 0.0, 0.9),     # 39 mito
+                            (1.0, 0.919, 0.35),    # 40 er
+                            (0.0, 0.5, 0.438),     # 41 ne
+                            (0.9, 0.0, 0.675),     # 42 np
+                            (0.838, 1.0, 0.35),    # 43 chrom
+                            (0.0, 0.375, 0.5),     # 44 mt
+                            (0.9, 0.0, 0.338),     # 45 cell
+                            (0.594, 1.0, 0.35),    # 46 er_mem_all
+                            (0.0, 0.188, 0.5),     # 47 ne_mem_all
                         ]
 
                         H, W = img_hw.shape
@@ -1023,6 +1062,9 @@ def train(args: argparse.Namespace) -> None:
 
                     except Exception as e:
                         print(f"  [warn] Failed to log val images: {e}")
+                else:
+                    print(f"  [info] No non-empty validation sample found for visualization "
+                          f"(98%+ of validation blocks are empty padded regions)")
 
                 # Save best model (EMA if available, else regular unwrapped)
                 is_new_best = False

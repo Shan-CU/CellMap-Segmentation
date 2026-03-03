@@ -1,6 +1,6 @@
-WH# CellMap Segmentation — Experiment Progress & Handoff Document
+# CellMap Segmentation — Experiment Progress & Handoff Document
 
-> **Last updated:** February 26, 2026  
+> **Last updated:** March 3, 2026  
 > **Author:** AI Agent (GitHub Copilot, Claude Opus 4.6)  
 > **Purpose:** Full context for any agent continuing this work
 
@@ -13,11 +13,12 @@ WH# CellMap Segmentation — Experiment Progress & Handoff Document
 3. [Codebase Architecture](#3-codebase-architecture)
 4. [Phase 1 Results — Complete](#4-phase-1-results--complete)
 5. [Key Findings & Decisions](#5-key-findings--decisions)
-6. [In-Flight Experiments](#6-in-flight-experiments)
-7. [Phase 2 Plan — Architecture Comparison](#7-phase-2-plan--architecture-comparison)
-8. [Known Issues & Caveats](#8-known-issues--caveats)
+6. [Phase 2 v4 Results — In Progress](#6-phase-2-v4-results--in-progress)
+7. [Phase 2 Configuration & Launch History](#7-phase-2-configuration--launch-history)
+8. [Known Issues & Bugs](#8-known-issues--bugs)
 9. [File Reference](#9-file-reference)
-10. [How to Run Experiments](#10-how-to-run-experiments)
+10. [How to Run](#10-how-to-run)
+11. [Next Steps (Priority Order)](#11-next-steps-priority-order)
 
 ---
 
@@ -49,11 +50,12 @@ Group (17): nuc, golgi, ves, endo, lyso, ld, eres, perox, mito, er, ne, np,
 
 ### Clusters
 
-| Cluster | Partition | GPU | VRAM | Host RAM | Account | Use |
-|---------|-----------|-----|------|----------|---------|-----|
-| Longleaf | `l40-gpu` | NVIDIA L40S | 48 GB | ~1 TB | `rc_cburch_pi` | 2D experiments |
-| Sycamore | `h100_sn` | NVIDIA H100 | 80 GB | ~1 TB | `rc_alain_pi` | 3D experiments |
-| Sycamore | `h100_mn` | NVIDIA H100 (multi) | 80 GB | ~1 TB | `rc_alain_pi` | ⚠️ Avoid — jobs get stuck |
+| Cluster | Partition | GPU | VRAM | Nodes | Status (Mar 3) |
+|---------|-----------|-----|------|-------|----------------|
+| Longleaf | `l40-gpu` | NVIDIA L40S | 48 GB | 13+5 | ✅ UP (95 GPUs running, 700 pending) |
+| Longleaf | `a100-gpu` | NVIDIA A100-PCIe | 40 GB | 8 | ✅ UP |
+| Longleaf | `a100-multi-gpu` | NVIDIA A100-SXM4 | 80 GB | 1 (8 GPUs) | ✅ UP — 6/8 GPUs ours |
+| Sycamore | — | — | — | — | ❌ H100s returned to Lenovo, no GPU partition |
 
 ### Environment
 
@@ -315,158 +317,297 @@ EMA (exponential moving average) provided a 4× val_loss improvement (0.466 → 
 
 ---
 
-## 6. In-Flight Experiments
+## 6. Phase 2 v4 Results — In Progress
 
-### Validation: Data Loading Improvements (Longleaf L40S)
+> **Status:** 8 models RUNNING across 2 partitions (Mar 3 evening). SwinUNETR killed (no pretraining, no path to competitive performance). Swin-2D relaunched with optimized hyperparams. ViT-2D launched. All 3 train.py bugs fixed.
 
-These validate features cherry-picked from the OrganelleSeg repo (coworker Greg's pipeline):
+### Overall Ranking (as of suspension, March 3 2026)
 
-| Job ID | Name | Config | Status | Expected Finish |
-|--------|------|--------|--------|-----------------|
-| 33019765 | `val_intensity_aug` | dice_bce + EMA + fg_mask + **intensity aug** | RUNNING (~1h in) | ~4-5h from submission |
-| 33019782 | `val_crop_weights` | dice_bce + EMA + fg_mask + **class-aware sampling** | RUNNING (~1h in) | ~4-5h from submission |
-| 33019784 | `val_combined` | dice_bce + EMA + fg_mask + **both** | RUNNING (~1h in) | ~4-5h from submission |
+| Rank | Model | Best Mean Dice | Best Epoch | Latest Epoch | Active Classes | Trend | Status |
+|------|-------|---------------|------------|-------------|----------------|-------|--------|
+| 1 | **unet_2d** | **0.3937** | 45 | ~48 | 47/48 | ↑ still climbing | ✅ RUNNING (l40-gpu) |
+| 2 | **resnet_2d** | **0.3489** | 55 | ~58 | 43/48 | ↑ still climbing | ✅ RUNNING (l40-gpu) |
+| 3 | unet_3d | 0.2212 | 20 | ~24 | 38/48 | ↑ steep upward | ✅ RUNNING (a100) |
+| 4 | resnet_3d | 0.2207 | 20 | ~24 | 36/48 | ↑ steep upward | ✅ RUNNING (a100) |
+| 5 | segresnet_3d | 0.0826 | 45 | ~49 | 27/48 | ↑ slow but steady | ✅ RUNNING (a100) |
+| 6 | swin_2d | 0.0446 | 5 | 0 (restarted) | — | 🔄 **RELAUNCHED** | ✅ RUNNING (a100, fresh) |
+| 7 | vit_2d | — | — | 0 (new) | — | 🆕 just started | ✅ RUNNING (a100) |
+| 8 | vitnet_3d | 0.0002 | 10 | ~17 | 0/48 | ❌ dead — zero learning | ✅ RUNNING (l40-gpu) |
+| — | ~~swinunetr_3d~~ | 0.0335 | 15 | 20 | 8/48 | ❌ killed | 🛑 KILLED |
 
-**Baseline:** `tech_2d_dicebce_ema` → val_loss = 0.112
+### Validation Trajectories
 
-### Validation Results — ❌ All HURT Performance
+```
+resnet_2d   (11 val pts): 0.226 → 0.319 → 0.343 → 0.339 → 0.334 → 0.336 → 0.327 → 0.346 → 0.344 → 0.342 → 0.349  ↑
+unet_2d     ( 9 val pts): 0.111 → 0.240 → 0.310 → 0.349 → 0.362 → 0.381 → 0.393 → 0.390 → 0.394  ↑
+unet_3d     ( 4 val pts): 0.013 → 0.064 → 0.154 → 0.221  ↑↑ (accelerating)
+resnet_3d   ( 4 val pts): 0.031 → 0.164 → 0.217 → 0.221  ↑
+segresnet_3d( 9 val pts): 0.000 → 0.004 → 0.025 → 0.043 → 0.052 → 0.071 → 0.073 → 0.080 → 0.083  ↑
+swin_2d     ( 9 val pts): 0.045 → 0.034 → 0.026 → 0.020 → 0.019 → 0.024 → 0.017 → 0.015 → 0.017  ↓ COLLAPSING
+swinunetr_3d( 4 val pts): 0.023 → 0.028 → 0.034 → 0.028  → stalled
+vitnet_3d   ( 3 val pts): 0.000 → 0.000 → 0.000  ❌ DEAD
+```
 
-| Experiment | Extra Feature | Val Loss | Mean Dice (14-class) | Verdict |
-|------------|--------------|----------|---------------------|---------|
-| `val_intensity_aug` | intensity augmentation | 0.1349 | 0.3539 | ❌ −23% |
-| `val_crop_weights` | class-aware crop weighting | 0.1228 | 0.2849 | ❌ −38% |
-| `val_combined` | both | 0.1350 | 0.2133 | ❌ −54% |
+### Best Dice Per Class (Optimal Ensemble)
 
-**Conclusion:** Neither feature helps. Both are excluded from Phase 2.
+| Class | Best Dice | Best Model | | Class | Best Dice | Best Model |
+|-------|-----------|------------|-|-------|-----------|------------|
+| ecs | 0.5303 ★ | resnet_2d | | ves_mem | 0.1849 | resnet_3d |
+| pm | 0.3851 | resnet_2d | | ves_lum | 0.2532 | resnet_3d |
+| mito_mem | 0.6787 ★ | unet_2d | | ves | 0.2772 | resnet_3d |
+| mito_lum | 0.7624 ★ | unet_2d | | endo_mem | 0.1750 | unet_2d |
+| mito_ribo | 0.3558 | unet_2d | | endo_lum | 0.2992 | resnet_2d |
+| mito | 0.0828 | unet_2d | | endo | 0.2965 | unet_2d |
+| er_mem | 0.4738 | resnet_2d | | lyso_mem | 0.1462 | resnet_2d |
+| er_lum | 0.6551 ★ | unet_2d | | lyso_lum | 0.2836 | unet_2d |
+| er | 0.7195 ★ | resnet_2d | | lyso | 0.2705 | unet_2d |
+| er_mem_all | 0.4825 | resnet_2d | | ld_mem | 0.1638 | unet_2d |
+| eres_mem | 0.1511 | resnet_2d | | ld_lum | 0.7795 ★ | resnet_2d |
+| eres_lum | 0.2050 | resnet_2d | | ld | 0.8108 ★ | resnet_2d |
+| eres | 0.2109 | resnet_2d | | perox_mem | 0.2112 | unet_2d |
+| golgi_mem | 0.3951 | resnet_2d | | perox_lum | 0.6020 ★ | unet_2d |
+| golgi_lum | 0.4784 | unet_2d | | perox | 0.0229 | unet_2d |
+| golgi | 0.6757 ★ | unet_2d | | mt_out | 0.0456 | resnet_2d |
+| np_out | 0.4017 | unet_2d | | mt_in | 0.0252 | resnet_3d |
+| np_in | 0.4764 | resnet_2d | | mt | 0.0592 | resnet_2d |
+| np | 0.5683 ★ | unet_2d | | ne_mem | 0.5541 ★ | unet_2d |
+| ne_lum | 0.6306 ★ | unet_2d | | nucpl | 0.6399 ★ | unet_2d |
+| ne | 0.7589 ★ | unet_2d | | nuc | 0.0868 | unet_2d |
+| ne_mem_all | 0.5872 ★ | unet_2d | | chrom | 0.5713 ★ | unet_2d |
+| cell | 0.8633 ★ | unet_3d | | hchrom | 0.5717 ★ | unet_2d |
+| cyto | 0.8118 ★ | unet_2d | | echrom | 0.0031 | unet_2d |
 
-### All 3D Ablations — ✅ Complete
+### Ensemble Summary
 
-All 29 3D experiments are complete. See Section 4 for full Dice eval results.
-3D results were essentially non-functional (max Dice = 0.017) due to insufficient training
-(50 epochs × 250 iters = 12,500 steps for 128³ volumes).
+| Model | Classes Won | Avg Dice (won classes) |
+|-------|------------|----------------------|
+| **unet_2d** | 27 | 0.4407 |
+| **resnet_2d** | 16 | 0.3856 |
+| **unet_3d** | 1 (cell) | 0.8633 |
+| **resnet_3d** | 4 (ves family + mt_in) | 0.1851 |
+
+- **Best single model:** unet_2d → 0.3937 mean Dice
+- **Optimal ensemble:** 0.4099 mean Dice (+4.1% over best single)
+- **16 classes above 0.5**, including cell (0.86), ld (0.81), cyto (0.81), mito_lum (0.76)
+
+### Classes Needing Improvement (< 0.1 Dice)
+
+| Class | Best Dice | Best Model | Status |
+|-------|-----------|------------|--------|
+| echrom | 0.0031 | unet_2d | ⚠️ near-zero |
+| perox | 0.0229 | unet_2d | 📈 emerging |
+| mt_in | 0.0252 | resnet_3d | 📈 emerging |
+| mt_out | 0.0456 | resnet_2d | 📈 emerging |
+| mt | 0.0592 | resnet_2d | 📈 emerging |
+| mito | 0.0828 | unet_2d | 📈 emerging |
+| nuc | 0.0868 | unet_2d | 📈 emerging |
+
+### Model Health Assessment
+
+- ✅ **5 healthy models** (resnet_2d, unet_2d, resnet_3d, unet_3d, segresnet_3d) — all learning, no collapse
+- 🔄 **swin_2d** — RELAUNCHED with optimized hyperparams (see below). Old run peaked at epoch 5 (0.045) then collapsed due to over-regularization
+- 🆕 **vit_2d** — LAUNCHED (all 3 bugs fixed: inplace=False, grad_accum unscale, batch=4+accum=2). Running on a100-multi-gpu
+- ❌ **vitnet_3d** — dead (0.000 dice at epoch 17), but only at 17/1000 epochs. Leaving it running in case it's just extremely slow to converge
+- 🛑 **swinunetr_3d** — KILLED. No pretrained weights available (MONAI's SSL weights trained on CT, wrong domain for EM). At epoch 20: dice=0.028, 8× worse than ResNet/UNet at same epoch, declining. Freed 1 A100 GPU
+
+### Swin-2D Relaunch (March 3)
+
+**Diagnosis:** Over-regularized — dropout=0.1 + wd=0.05 + stochastic_depth=0.2 was too much for our small dataset. LR=1e-4 also too conservative without pretrained weights.
+
+**Changes applied:**
+- `model_zoo.py`: dropout 0.1 → **0.0** (stochastic_depth=0.2 provides sufficient regularization)
+- LR: 1e-4 → **5e-4** (Swin V2 paper uses 5e-4 for fine-tuning)
+- Weight decay: 0.05 → **0.01**
+- Warmup: 10 → **20 epochs** (longer warmup for higher LR)
+- Grad clip: 1.0 → **5.0** (relaxed for higher LR)
+- Old checkpoints/tensorboard cleaned. Fresh start from epoch 0.
+
+### SwinUNETR Killed — Rationale (March 3)
+
+MONAI's official SwinUNETR recipe requires SSL-pretrained weights (from 5,050 CT scans). Without pretraining:
+- At epoch 20: dice=0.028 vs ResNet-3D=0.221 (8× worse at same epoch)
+- Dice peaked at epoch 15 (0.034) then declined to 0.028
+- Train loss stalled at ~0.43 (same as UNet-3D, but UNet has 5× better dice)
+- The pretrained weights can't transfer from CT→EM (different domain, resolution, intensity)
+- No realistic path to competitive performance. GPU better used elsewhere
+
+### Key Insight: 3D Models Still Early
+
+The 3D models are only at epoch 15-20 (out of 100). Their trajectories show steep upward trends:
+- **unet_3d**: 0.013 → 0.064 → 0.154 → 0.221 (doubling every 5 epochs)
+- **resnet_3d**: 0.031 → 0.164 → 0.217 → 0.221
+
+These models will likely improve substantially by epoch 100. The 3D models already win specific classes (cell, ves family) where volumetric context matters.
 
 ---
 
-## 7. Phase 2 Plan — Architecture Comparison
+## 7. Phase 2 Configuration & Launch History
 
 ### Configuration ✅ FINALIZED
 
 ```python
-# Phase 2 recipe (from Phase 1 ablation winner)
+# Phase 2 v4 recipe (from Phase 1 ablation winner)
 loss = "dice_bce"           # SegResNet too (with deep_supervision)
 use_foreground_mask = True
 ema = True
 ema_decay = 0.999
 weighted_sampler = True     # cellmap-data default
-intensity_aug = False        # DISABLED — hurt −23%
+intensity_aug = False       # DISABLED — hurt −23%
 class_aware_sampling = False # DISABLED — hurt −38%
+bias_init_mode = "per_class" # Critical: -3.0 bias init prevents rare-class collapse
 
 # 2D settings
 epochs_2d = 100
 iterations_per_epoch_2d = 1000
 val_every_n_epochs_2d = 5
 warmup_epochs_2d = 10
-batch_size_2d = 8            # (ViT uses 4 due to CUDA kernel bug)
+batch_size_2d = 8            # (ViT uses 4+grad_accum=2 due to CUDA kernel bug)
 lr_2d = 1e-4
+optimizer_2d = "radam"       # (ViT-2D uses adamw+wd=0.01; Swin-2D uses adamw+lr=5e-4+wd=0.01)
+scheduler = "cosine"
 
 # 3D settings
-epochs_3d = 1000
-iterations_per_epoch_3d = 300
+epochs_3d = 100
+iterations_per_epoch_3d = 1000
 val_every_n_epochs_3d = 5
-warmup_epochs_3d = 34
+warmup_epochs_3d = 10
 batch_size_3d = 8
-lr_3d = 4e-4                 # linearly scaled from 1e-4 @ batch=2
-input_shape_3d = [96, 96, 96]  # 768nm box, 152 datasets (vs 78 at 128^3)
+lr_3d = 1e-4
+input_shape_3d = [1, 96, 96, 96]
+input_scale_3d = [8, 8, 8]
 ```
 
 ### ⚠️ Phase 2 Launch History
 
-**v1 launch (Feb 27):** Missing `--ema` flag (sbatch had `--ema_decay 0.999` but not `--ema`).
-SegResNet used BST instead of dice_bce. ViT crashed (CUDA kernel error at batch=8).
-All 8 jobs killed and relaunched as v2.
+**v1 (Feb 27):** Missing `--ema` flag. SegResNet used BST instead of dice_bce. ViT crashed. All killed.
 
-**v2 launch (Feb 28):** All fixes applied:
-- EMA enabled (`--ema --ema_decay 0.999` baked into both sbatch files)
-- SegResNet switched to `dice_bce + --deep_supervision`
-- ViT batch reduced to 4 (CUDA kernel launch bug with BatchNorm2d + AMP at batch=8)
-- All 9 models on Longleaf L40S single GPU
+**v2 (Feb 28):** EMA fixed, SegResNet on dice_bce+DS, ViT batch→4. Jobs ran but many classes had zero Dice — models collapsed on rare classes due to default zero bias init.
 
-### 2D Runs (Longleaf L40S, 100ep × 1000it)
+**v3 (Mar 1):** Added `--bias_init_mode per_class` (sets final layer bias to -3.0 for all classes, matching sigmoid(−3)≈0.05 prior). Dramatic improvement: 47/48 classes now have signal vs ~14 in v2.
 
-| Job Name | Model | Batch | Params | Loss |
-|----------|-------|-------|--------|------|
-| `p2_resnet_2d` | FlexUNet-ResNet34 | 8 | ~7.8M | dice_bce |
-| `p2_unet_2d` | CSC UNet 2D | 8 | ~31M | dice_bce |
-| `p2_swin_2d` | SwinTransformer 2D | 8 | ~36M | dice_bce |
-| `p2_vit_2d` | ViTVNet 2D | **4** | ~105M | dice_bce |
+**v4 (Mar 1, CURRENT):** Full relaunch with finalized configs. Key changes from v3:
+- Consistent hyperparams across all models
+- 3D models: 100 epochs × 1000 iters (not 1000 × 300)
+- All on Longleaf (Sycamore H100s returned to Lenovo)
+- Per-model sbatch files in `training/slurm/phase2v4/`
+- ViT-2D: `inplace=False` fix for LeakyReLU + batch=4+grad_accum=2
 
-### 3D Runs (Longleaf L40S, 1000ep × 300it, 96³ crops)
+### SLURM Jobs (v4)
+
+| Job ID | Name | Partition | Node | Status (Mar 3 evening) |
+|--------|------|-----------|------|------------------|
+| 33957705 | p2v4_resnet_2d | l40-gpu | — | ✅ RUNNING |
+| 33957706 | p2v4_unet_2d | l40-gpu | — | ✅ RUNNING |
+| 33957741 | p2v4_vitnet_3d_l40 | l40-gpu | — | ✅ RUNNING |
+| 33957709 | p2v4_resnet_3d | a100-multi-gpu | g180701 | ✅ RUNNING |
+| 33957710 | p2v4_unet_3d | a100-multi-gpu | g180701 | ✅ RUNNING |
+| 33957711 | p2v4_segresnet_3d | a100-multi-gpu | g180701 | ✅ RUNNING |
+| 34357567 | p2v4_swin_2d | a100-multi-gpu | g180701 | ✅ RUNNING (relaunched, optimized) |
+| 34359105 | p2v4_vit_2d | a100-multi-gpu | g180701 | ✅ RUNNING (new) |
+| ~~33957707~~ | ~~p2v4_swin_2d~~ | ~~l40-gpu~~ | — | 🛑 KILLED (over-regularized, relaunched on a100) |
+| ~~33957712~~ | ~~p2v4_swinunetr_3d~~ | ~~a100-multi-gpu~~ | — | 🛑 KILLED (no pretraining, non-competitive) |
+
+### 2D Runs (100ep × 1000it)
+
+| Job Name | Model | Batch | Params | Loss | Optimizer |
+|----------|-------|-------|--------|------|-----------|
+| `p2v4_resnet_2d` | FlexUNet-ResNet34 | 8 | ~7.8M | dice_bce | RAdam |
+| `p2v4_unet_2d` | CSC UNet 2D | 8 | ~31M | dice_bce | RAdam |
+| `p2v4_swin_2d` | SwinTransformer 2D | 8 | ~36M | dice_bce | AdamW (lr=5e-4, wd=0.01, dropout=0.0) |
+| `p2v4_vit_2d` | ViTVNet 2D | 4+accum2 | ~105M | dice_bce | AdamW (lr=1e-4, wd=0.01) |
+
+### 3D Runs (100ep × 1000it, 96³ crops)
 
 | Job Name | Model | Batch | Params | Loss | Extra |
 |----------|-------|-------|--------|------|-------|
-| `p2_segresnet_3d` | SegResNetDS | 8 | ~20M | **dice_bce** | `--deep_supervision` |
-| `p2_swinunetr_3d` | SwinUNETR | 8 | ~62M | dice_bce | |
-| `p2_unet_3d` | MONAI UNet 3D | 8 | ~90M | dice_bce | |
-| `p2_resnet_3d` | MONAI ResNet 3D | 8 | ~24M | dice_bce | |
-| `p2_vitnet_3d` | MONAI ViTAutoEnc | 8 | ~32M | dice_bce | |
-
-### Launch Command
-
-```bash
-# From longleaf login node:
-cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
-bash training/slurm/launch_phase2_clean.sh        # all 9 jobs
-bash training/slurm/launch_phase2_clean.sh --2d-only  # 4 × 2D only
-bash training/slurm/launch_phase2_clean.sh --3d-only  # 5 × 3D only
-```
+| `p2v4_segresnet_3d` | SegResNetDS | 8 | ~20M | dice_bce | `--deep_supervision` |
+| ~~`p2v4_swinunetr_3d`~~ | ~~SwinUNETR~~ | ~~8~~ | ~~\~62M~~ | ~~dice\_bce~~ | **KILLED** — no pretraining, non-competitive |
+| `p2v4_unet_3d` | CSC UNet 3D | 8 | ~90M | dice_bce | |
+| `p2v4_resnet_3d` | CSC FlexUNet3D | 8 | ~24M | dice_bce | |
+| `p2v4_vitnet_3d_l40` | CSC ViTVNet 3D | 8 | ~32M | dice_bce | |
 
 ---
 
-## 8. Known Issues & Caveats
+## 8. Known Issues & Bugs
+
+### ✅ FIXED: `train.py` gradient_accumulation + AMP scaler bug
+
+**Status: FIXED (March 3, 2026)**
+
+When `gradient_accumulation_steps > 1`, the grad clipping code was calling `scaler.unscale_(optimizer)` on **every micro-step**, but `scaler.step()` and `scaler.update()` only run on accumulation boundary steps. This caused:
+```
+RuntimeError: unscale_() has already been called on this optimizer since the last update()
+```
+
+**Fix applied:** Moved `scaler.unscale_(optimizer)` and `torch.nn.utils.clip_grad_norm_()` inside the `if (step + 1) % args.gradient_accumulation_steps == 0:` block, **before** `scaler.step(optimizer)` in `training/train.py` (~line 729).
+
+### ✅ FIXED: ViT-2D `cudaErrorInvalidConfiguration`
+
+**Status: FULLY FIXED (March 3, 2026)**
+
+Root cause: batch=8 + AMP + DiceBCE loss creates CUDA kernels with invalid launch parameters due to large activation tensors (8×48×256×256) through `torch.sigmoid(input.float())` + Dice spatial reduction.
+
+**Fixes applied:**
+1. All 4 `inplace=True` → `inplace=False` on LeakyReLU in `src/.../models/vit_2d.py`
+2. Reduced to batch=4 + gradient_accumulation_steps=2 (effective batch=8)
+3. Gradient accumulation unscale bug fixed (see above)
+
+ViT-2D is now training — launched as job 34359105 on a100-multi-gpu (March 3).
+
+### ✅ FIXED: Black validation input images
+
+**Status: FIXED (March 3, 2026)**
+
+**Root cause:** `pad=True` in `CellMapDataSplit` causes each validation dataset to pad the EM volume to its full bounding box. `CellMapDataset.validation_indices` then tiles the ENTIRE padded volume with non-overlapping blocks — creating 132K+ blocks, ~98% of which are in empty padded regions (all-zero EM inputs). The `CellMapDataLoader` for validation has no `weighted_sampler` or `iterations_per_epoch` (unlike training), so it uniformly samples from this massive pool, almost always hitting empty padded blocks.
+
+**Why training still works:** The training loader uses `weighted_sampler=True` + `iterations_per_epoch=1000`, which biases sampling toward blocks with actual annotations via `CellMapMultiDataset.get_random_subset_indices(weighted=True)`. Validation loss and Dice are also unaffected — empty blocks contribute near-zero loss (NaN-masked targets) and don't corrupt Dice accumulators.
+
+**Fix applied:** `vis_sample` selection in `train.py` now requires both:
+- `inp_bi.abs().max() > 1e-6` (non-zero EM signal — not a padded block)
+- `gt_bi.sum() / gt_bi.numel() > 0.01` (≥1% annotated pixels)
+
+Also added a fallback warning message when no valid sample is found within the validation time limit.
+
+**Upstream note:** This is a design issue in cellmap-data where `validation_blocks` tiles the full padded volume rather than only annotated regions. A proper fix would be to add `weighted_sampler=True` to the validation `CellMapDataLoader` in `get_dataloader()`, or to use `pad="train"` instead of `pad=True` so validation doesn't pad.
 
 ### Validation Set Limitation
-The validation crops only annotate **14 of 48 classes**: ecs, pm, mito_mem, mito_lum, mito_ribo, golgi_mem, golgi_lum, ves_mem, ves_lum, endo_mem, endo_lum, er_mem, er_lum, nuc. The remaining 34 classes (including all group classes) cannot be evaluated during training. This means:
-- `val_loss` only measures performance on 14 classes
-- Per-class Dice is missing for 34 classes
-- The true challenge leaderboard score could differ significantly from val metrics
-
-### Sycamore h100_mn Partition
-Jobs on `h100_mn` (multi-node) partition tend to get stuck in PENDING indefinitely. Always use `h100_sn` (single-node) for Sycamore jobs.
-
-### AMP Overflow with BST
-BST with AMP float16 can produce inf logits due to the τ×log(π_c) adjustment for very rare classes. This was fixed by adding `nan_to_num()` clamping, but is irrelevant now that we've moved to dice_bce.
+The validation crops only annotate **14 of 48 classes**: ecs, pm, mito_mem, mito_lum, mito_ribo, golgi_mem, golgi_lum, ves_mem, ves_lum, endo_mem, endo_lum, er_mem, er_lum, nuc. The remaining 34 classes (including all group classes) cannot be evaluated during training.
 
 ### cellmap-data EmptyImage Memory
-cellmap-data pre-allocates `EmptyImage` tensors for all ~784 datasets on initialization. This requires ~300GB host RAM. Jobs must request ≥384G memory. Data should be loaded on CPU (`device="cpu"` in get_dataloader) and batches moved to GPU in the training loop.
+cellmap-data pre-allocates `EmptyImage` tensors for all ~784 datasets on initialization. This requires ~300GB host RAM. Jobs must request ≥384G memory. Data loaded on CPU, batches moved to GPU in training loop.
 
-### Git State
-As of Phase 2 v2 relaunch (Feb 28, 2026):
-- All Phase 1 infrastructure committed
-- Memory leak fix committed (2c4aa84): cellmap-data PR#64 + monkey-patch + MALLOC_ARENA_MAX=2
-- Phase 2 sbatch files have `--ema --ema_decay 0.999` baked in
-- SegResNet uses `dice_bce + --deep_supervision` (not BST)
-- ViT batch=4 fix in launch script
-- Launch script: `training/slurm/launch_phase2_clean.sh`
+### AMP Overflow with BST (Historical)
+BST with AMP float16 can produce inf logits due to the τ×log(π_c) adjustment. Fixed with `nan_to_num()` clamping, but irrelevant now (using dice_bce).
+
+### Sycamore h100 Partition (Historical)
+H100s returned to Lenovo. No GPU partition on Sycamore anymore. Only Longleaf GPUs available.
 
 ---
 
 ## 9. File Reference
 
-### Key Files to Read
+### Key Source Files
 
 | File | Purpose |
 |------|---------|
-| `training/train.py` | Main training loop — understand all flags and data flow |
-| `training/configs/experiments.py` | All experiment configs — modify for Phase 2 |
+| `training/train.py` | Main training loop (~1131 lines) — all flags, data flow, AMP, EMA, 48-color palette |
+| `training/configs/experiments.py` | All experiment configs |
 | `training/losses/loss_zoo.py` | Loss function registry — `dice_bce` is the winner |
-| `training/models/model_zoo.py` | Model registry — 9 architectures |
+| `training/models/model_zoo.py` | Model registry — 8 active architectures (swinunetr_3d killed) |
 | `training/eval_2d_perclass.py` | Per-class evaluation — run after training |
-| `training/transforms/intensity.py` | Intensity augmentation implementation |
-| `training/samplers/crop_weights.py` | Class-aware sampling implementation |
+| `training/regen_val_images.py` | Retroactive val image regeneration from checkpoints |
+| `training/make_legend.py` | Generate class_legend.png (48 classes, unique colors) |
+| `src/cellmap_segmentation_challenge/models/vit_2d.py` | ViT-V-Net 2D model (~529 lines, `inplace=False` fix applied) |
 | `src/cellmap_segmentation_challenge/utils/dataloader.py` | `get_dataloader()` wrapper |
-| `runs/ablation/eval_2d_perclass.json` | Full per-class Dice/IoU results for all 2D experiments |
 
-### Key Results Files
+### SLURM Launch Files
+
+| File | Purpose |
+|------|---------|
+| `training/slurm/phase2v4/*.sbatch` | Per-model sbatch files for Phase 2 v4 (8 active) |
+| `training/slurm/launch_phase2_clean.sh` | Legacy batch launcher (v1-v3, still works) |
+
+### Phase 1 Results Files
 
 | File | Content |
 |------|---------|
@@ -477,58 +618,78 @@ As of Phase 2 v2 relaunch (Feb 28, 2026):
 | `runs/ablation/eval_2d_perclass.json` | Per-class metrics (original 2D eval, 29 experiments) |
 | `runs/ablation/eval_14class_2d.json` | Per-class 14-class Dice (all 34 2D experiments) |
 | `runs/ablation/eval_14class_3d.json` | Per-class 14-class Dice (all 29 3D experiments) |
-| `runs/ablation/eval_all_perclass_2d.csv` | 2D leaderboard CSV |
-| `runs/ablation/eval_all_perclass_3d.csv` | 3D leaderboard CSV |
+
+### Phase 2 v4 Results & Checkpoints
+
+| File | Content |
+|------|---------|
+| `runs/monai_cellmap/<model>/tensorboard/` | TensorBoard event files |
+| `runs/monai_cellmap/<model>/checkpoints/` | Model checkpoints (best.pth, latest.pth) |
+| `runs/monai_2d/<model>/tensorboard/` | 2D model TensorBoard events |
+| `runs/monai_2d/<model>/checkpoints/` | 2D model checkpoints |
+
+### Utility Scripts (workspace root)
+
+| File | Purpose |
+|------|---------|
+| `/work/users/g/s/gsgeorge/cellmap/launch_tb.sh` | TensorBoard launcher with `--logdir_spec` for all Phase 2 v4 models |
+| `/work/users/g/s/gsgeorge/cellmap/analyze_p2v4.py` | Analysis script: reads TB events, ranks models, per-class Dice, ensemble selection |
+| `/work/users/g/s/gsgeorge/cellmap/check_2d_results.py` | Quick 2D results checker |
+
+### Debug Scripts (can be deleted)
+
+| File | Purpose |
+|------|---------|
+| `debug_vit2d.py` | Debug v1: component isolation for CUDA kernel error |
+| `debug_vit2d_v2.py` | Debug v2: training-loop-exact reproduction |
+| `debug_vit2d.sbatch` | SLURM script for debug jobs |
 
 ---
 
-## 10. How to Run Experiments
+## 10. How to Run
 
-### Submit a Single Experiment
+### Submit Phase 2 v4 Jobs
 
 ```bash
-# Via SSH to Longleaf (2D)
-ssh longleaf.unc.edu 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=<name> MODEL_NAME=<model> LOSS_NAME=<loss> \
-  USE_FG_MASK=true EXTRA_ARGS="--ema --ema_decay 0.999" \
-  sbatch --export=ALL --job-name=<name> training/slurm/ablation_2d_l40s.sbatch'
+# From Longleaf login node:
+cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation
 
-# Via SSH to Sycamore (3D) — ALWAYS use h100_sn
-ssh sycamore 'cd /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation && \
-  EXPERIMENT_NAME=<name> MODEL_NAME=<model> LOSS_NAME=<loss> \
-  USE_FG_MASK=true BATCH_SIZE=2 \
-  EXTRA_ARGS="--ema --ema_decay 0.999 --input_shape 128 128 128" \
-  sbatch --export=ALL --job-name=<name> \
-  --partition=h100_sn --account=rc_alain_pi \
-  training/slurm/ablation_3d_h100.sbatch'
+# Individual model:
+sbatch training/slurm/phase2v4/unet_2d.sbatch
+sbatch training/slurm/phase2v4/segresnet_3d.sbatch
+# etc.
+
+# All 9 models:
+for f in training/slurm/phase2v4/*.sbatch; do sbatch "$f"; done
 ```
 
 ### Check Job Status
 
 ```bash
-# Longleaf
-ssh longleaf.unc.edu 'squeue -u gsgeorge --format="%.10i %.20j %.10P %.8T %.12M %.6D %R"'
-# Sycamore
-ssh sycamore 'squeue -u gsgeorge --format="%.10i %.20j %.10P %.8T %.12M %.6D %R"'
-# Completed job history
-ssh longleaf.unc.edu 'sacct -u gsgeorge --starttime=2026-02-23 --format=JobID,JobName%30,State,ExitCode,Elapsed'
+# Active jobs
+squeue -u gsgeorge --format="%.10i %.25j %.15P %.8T %.12M %.6D %R"
+
+# Job history (last week)
+sacct -u gsgeorge --starttime=2026-02-25 --format=JobID,JobName%30,State,ExitCode,Elapsed,Partition
+
+# Check partition availability
+sinfo -p l40-gpu,a100-gpu,a100-multi-gpu --format="%P %a %D %T %N"
 ```
 
-### Read Results
+### Monitor Training
 
 ```bash
-# Last lines of job output (includes "Best val loss: X.XXXX")
-ssh longleaf.unc.edu 'tail -5 /work/users/g/s/gsgeorge/cellmap/repo/CellMap-Segmentation/runs/ablation/logs/<jobname>_<jobid>.out'
+# TensorBoard (run on Sycamore in tmux)
+cd /work/users/g/s/gsgeorge/cellmap
+bash launch_tb.sh
 
-# Grep best val loss from all log files
-for f in runs/ablation/logs/*.out; do
-  name=$(basename "$f" | sed 's/_[0-9]*.out//');
-  best=$(grep -o "Best val loss: [0-9.]*" "$f" | tail -1 | awk '{print $NF}');
-  echo "$name: $best";
-done | sort -t: -k2 -n
+# From laptop, SSH tunnel:
+ssh -N -L 6006:sycamore-login2:6006 gsgeorge@sycamore.unc.edu
+# Then open http://localhost:6006
 
-# TensorBoard
-tensorboard --logdir runs/ablation/<experiment_name>/tensorboard
+# Quick analysis (run on Sycamore or Longleaf)
+micromamba activate csc
+python /work/users/g/s/gsgeorge/cellmap/analyze_p2v4.py
 ```
 
 ### Run Per-Class Evaluation
@@ -539,19 +700,28 @@ python -m training.eval_2d_perclass \
   --experiment <experiment_name> \
   --run_dir runs/ablation \
   --output_dir runs/ablation
-
-# Results written to runs/ablation/eval_2d_perclass.json and .csv
 ```
 
 ---
 
-## Next Steps (for continuing agent)
+## 11. Next Steps (Priority Order)
 
-1. ✅ ~~Check validation results~~ Done — intensity_aug (−23%), crop_weights (−38%), combined (−54%). All hurt. Excluded.
-2. ✅ ~~Check remaining 3D results~~ Done — All 29 3D experiments complete. 3D ablation was non-functional (max Dice 0.017).
-3. ✅ ~~Fix Phase 2 launch~~ Done — EMA enabled, SegResNet on dice_bce+DS, ViT batch=4.
-4. **Monitor Phase 2 training** — 9 jobs running on Longleaf L40S:
-   - 2D first val: ~epoch 10 (~10h), 2D done: ~100h
-   - 3D first val: ~epoch 30 (~48h), 3D done: ~700h (~29 days)
-5. **Run per-class evaluation** on Phase 2 results to determine final model selection
-6. **Final submission preparation** — ensemble, post-processing, test set inference
+### Immediate (before next training cycle)
+
+1. **🔴 Fix `train.py` gradient accumulation unscale bug** — Required before ViT-2D can train. Move `scaler.unscale_()` + `clip_grad_norm_()` inside accumulation boundary conditional. See Section 8 for details.
+2. **Resubmit ViT-2D** — After fixing unscale bug, submit `training/slurm/phase2v4/vit_2d.sbatch`
+3. **Monitor suspended jobs** — 8 jobs SUSPENDED for `switch_work` maintenance (1-2 hours). Should resume automatically. Check with `squeue`.
+
+### Short-term (this week)
+
+4. **Diagnose swin_2d declining** — Loss/Dice declining since epoch 5. May need LR reduction or early stopping. Consider restarting with lower LR.
+5. **Diagnose vitnet_3d dead** — Zero Dice across all epochs. Check if model is producing constant outputs. May have architecture bug or need different LR/optimizer.
+6. **Rerun analysis** once 3D models reach epoch 50+ — their trajectories are steep, rankings will shift significantly.
+
+### Medium-term (when Phase 2 v4 completes)
+
+7. **Final per-class evaluation** on all models with the best checkpoints
+8. **Ensemble selection** — Greedy forward selection verified by `analyze_p2v4.py`
+9. **Post-processing** — Connected components, size filtering for noisy classes
+10. **Test set inference** — Generate submission predictions
+11. **Challenge submission** — Final leaderboard entry
