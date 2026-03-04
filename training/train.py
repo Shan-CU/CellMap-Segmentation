@@ -157,6 +157,9 @@ def parse_args() -> argparse.Namespace:
                         choices=["none", "cosine", "step"],
                         help="LR scheduler type")
     parser.add_argument("--warmup_epochs", type=int, default=5)
+    parser.add_argument("--eta_min", type=float, default=0.0,
+                        help="Minimum LR for cosine scheduler (default: 0). "
+                             "Set to e.g. 1e-6 to prevent LR collapsing to zero.")
 
     # Validation
     parser.add_argument("--validation_time_limit", type=int, default=600,
@@ -513,15 +516,18 @@ def train(args: argparse.Namespace) -> None:
     # === Scheduler ===
     scheduler = None
     if args.scheduler == "cosine":
-        # Warmup + cosine annealing
+        # Warmup + cosine annealing with optional eta_min floor
         total_steps = args.epochs * args.iterations_per_epoch
         warmup_steps = args.warmup_epochs * args.iterations_per_epoch
+        # eta_min_ratio: fraction of base LR that is the floor
+        eta_min_ratio = args.eta_min / args.learning_rate if args.learning_rate > 0 else 0.0
 
         def lr_lambda(step):
             if step < warmup_steps:
                 return step / max(warmup_steps, 1)
             progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
-            return 0.5 * (1 + np.cos(np.pi * progress))
+            # Cosine decay from 1.0 to eta_min_ratio (instead of 0)
+            return eta_min_ratio + (1.0 - eta_min_ratio) * 0.5 * (1 + np.cos(np.pi * progress))
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     elif args.scheduler == "step":

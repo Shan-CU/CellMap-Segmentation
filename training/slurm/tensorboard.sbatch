@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=general
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --mem=64G
 #SBATCH --time=11-00:00:00
 #SBATCH --job-name=tb_phase2
 #SBATCH --output=runs/ablation/logs/tensorboard_%j.out

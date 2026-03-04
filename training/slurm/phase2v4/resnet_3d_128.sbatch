@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=p2v4_segresnet_3d
+#SBATCH --job-name=p2v4_resnet_3d_128
 #SBATCH --partition=a100-multi-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --account=rc_cburch_pi
@@ -7,32 +7,25 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 #SBATCH --time=11-00:00:00
-#SBATCH --output=runs/ablation/logs/p2v4_segresnet_3d_%j.out
-#SBATCH --error=runs/ablation/logs/p2v4_segresnet_3d_%j.err
+#SBATCH --output=runs/ablation/logs/p2v4_resnet_3d_128_%j.out
+#SBATCH --error=runs/ablation/logs/p2v4_resnet_3d_128_%j.err
 
 # ============================================================================
-# Phase 2 v4 RELAUNCH: SegResNetDS 3D — Full Auto3DSeg Config on A100 80GB
+# Phase 2 v4: ResNet 3D — 128³ ROI (CSC Default)
 # ============================================================================
-# Architecture: MONAI SegResNetDS (model_zoo.py) — ~87M params
-#   - blocks_down=(1,2,2,4,4), dsdepth=4, InstanceNorm
-#   - 5-level encoder, deep supervision with 4 auxiliary outputs
+# Architecture: CSC ResNet 3D (~7.8M params)
+#   - ngf=64, n_blocks=6, n_downsampling=2
 #
-# CHANGES FROM FAILED v4 RUN (overfitting: peaked 0.083 dice, collapsed to 0.046):
-#   1. ROI: 96³ → 224³ (full Auto3DSeg default, 12.7× more context)
-#      - Bottleneck: 6³=216 voxels → 14³=2744 voxels
-#      - Physical context: 0.77µm → 1.79µm
-#      - Profiled: 62.2GB peak at batch=4 (17GB headroom on A100 80GB)
-#   2. Intensity augmentation: OFF → ON (--intensity_aug)
-#      - Auto3DSeg uses 4 intensity transforms; we had zero
-#      - Critical regularization for 87M params to prevent overfitting
-#   3. Warmup: 34 epochs → 10 epochs (1% of training, matches Auto3DSeg 3/300)
+# FIX: ROI 96³ → 128³ to match CSC example default (train_3D.py).
+#   - 96³ = 884K voxels → 128³ = 2.1M voxels (2.37× more context)
+#   - Physical context: 0.77µm → 1.02µm per crop at 8nm spacing
+#   - Memory: ~28GB at 96³ b=8 → ~66GB at 128³ b=8 (fits A100 80GB)
 #
-# Root cause of failure: ROI=96³ was 12% of designed context → 87M params
-# memorized the tiny crops. Train loss kept falling while val dice collapsed.
+# Everything else identical to the original p2v4_resnet_3d run.
+# This is a fresh start (no checkpoint resume) with correct ROI.
 #
-# Recipe: dice_bce + EMA(0.999) + fg_mask + weighted_sampler + intensity_aug
-# Training: 1000 epochs × 300 iters, batch=4, 224³ crops @ 8nm
-# Validation: every 5 epochs, per-class Dice (48 classes), 600s time limit
+# Recipe: dice_bce + EMA(0.999) + fg_mask + weighted_sampler
+# Training: 1000 epochs × 300 iters, batch=8, 128³ crops @ 8nm
 # ============================================================================
 
 set -euo pipefail
@@ -54,24 +47,24 @@ export MALLOC_MMAP_THRESHOLD_=65536
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "============================================"
-echo "Phase 2 v4 RELAUNCH: SegResNetDS 3D (Full Auto3DSeg: 224³ + intensity_aug)"
+echo "Phase 2 v4: ResNet 3D — 128³ ROI (CSC Default)"
 echo "Node: $(hostname) | GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1)"
 echo "============================================"
 
 python -m training.train \
-    --experiment_name p2v4_segresnet_3d \
+    --experiment_name p2v4_resnet_3d_128 \
     --run_dir runs/ablation \
-    --model segresnet_3d \
+    --model resnet_3d \
     --loss dice_bce \
-    --batch_size 4 \
-    --input_shape 224 224 224 \
+    --batch_size 8 \
+    --input_shape 128 128 128 \
     --input_scale 8 8 8 \
     --epochs 1000 \
     --iterations_per_epoch 300 \
-    --learning_rate 2e-4 \
+    --learning_rate 4e-4 \
     --max_grad_norm 1.0 \
     --scheduler cosine \
-    --warmup_epochs 10 \
+    --warmup_epochs 34 \
     --validation_time_limit 600 \
     --val_every_n_epochs 5 \
     --best_metric val_dice \
@@ -79,10 +72,8 @@ python -m training.train \
     --amp \
     --ema --ema_decay 0.999 \
     --bias_init_mode per_class \
-    --optimizer adamw \
-    --weight_decay 1e-5 \
-    --deep_supervision \
-    --intensity_aug \
+    --optimizer radam \
+    --weight_decay 0.0 \
     --random_seed 42 \
     --use_foreground_mask \
     --datasplit_path datasplit.csv \
